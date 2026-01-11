@@ -222,22 +222,23 @@ func ParseSessionFile(path string) ([]CommandEntry, SessionMetadata, error) {
 }
 
 // ParseSessionFileFrom reads a JSONL file starting from a byte offset
-// Returns commands found, new offset, and any error
-func ParseSessionFileFrom(path string, offset int64) ([]CommandEntry, int64, error) {
+// Returns commands found, metadata, new offset, and any error
+func ParseSessionFileFrom(path string, offset int64) ([]CommandEntry, SessionMetadata, int64, error) {
 	file, err := os.Open(path)
 	if err != nil {
-		return nil, offset, err
+		return nil, SessionMetadata{}, offset, err
 	}
 	defer file.Close()
 
 	// Seek to offset
 	if offset > 0 {
 		if _, err := file.Seek(offset, 0); err != nil {
-			return nil, offset, err
+			return nil, SessionMetadata{}, offset, err
 		}
 	}
 
 	var commands []CommandEntry
+	var meta SessionMetadata
 	seen := make(map[string]bool)
 
 	scanner := bufio.NewScanner(file)
@@ -251,6 +252,14 @@ func ParseSessionFileFrom(path string, offset int64) ([]CommandEntry, int64, err
 		var record JSONLRecord
 		if err := json.Unmarshal(line, &record); err != nil {
 			continue
+		}
+
+		// Capture metadata from records that have it
+		if record.CWD != "" && meta.CWD == "" {
+			meta.CWD = record.CWD
+		}
+		if record.GitBranch != "" && meta.GitBranch == "" {
+			meta.GitBranch = record.GitBranch
 		}
 
 		if record.Type != "assistant" || record.Message == nil {
@@ -307,5 +316,5 @@ func ParseSessionFileFrom(path string, offset int64) ([]CommandEntry, int64, err
 		}
 	}
 
-	return commands, offset, scanner.Err()
+	return commands, meta, offset, scanner.Err()
 }

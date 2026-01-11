@@ -138,10 +138,10 @@ func (w *Watcher) parseSessionFile(path, encodedProject string) *Session {
 		return nil
 	}
 
-	// Use CWD from session file if available, otherwise fall back to decoded directory name
+	// Use CWD from session file if available, otherwise show the encoded directory name
 	projectPath := meta.CWD
 	if projectPath == "" {
-		projectPath = decodeProjectPath(encodedProject)
+		projectPath = encodedProject
 	}
 
 	// Also parse subagent files if they exist
@@ -188,33 +188,6 @@ func (w *Watcher) parseSessionFile(path, encodedProject string) *Session {
 	}
 }
 
-// decodeProjectPath converts directory name to path
-// Encoding: single dash = path separator, double dash = dot (for hidden files/dirs)
-// Note: underscores and dashes in original path both become single dash, so decoding is lossy
-// We verify the path exists, otherwise return the encoded name
-func decodeProjectPath(encoded string) string {
-	if encoded == "" {
-		return ""
-	}
-
-	// Use a placeholder for double-dash (dot in original path)
-	const placeholder = "\x00"
-	result := strings.ReplaceAll(encoded, "--", placeholder)
-
-	// Replace single dashes with path separators
-	result = strings.ReplaceAll(result, "-", "/")
-
-	// Restore dots from placeholder
-	result = strings.ReplaceAll(result, placeholder, ".")
-
-	// Verify path exists, otherwise return encoded name
-	if _, err := os.Stat(result); err != nil {
-		// Path doesn't exist with this decoding, return encoded name
-		return encoded
-	}
-
-	return result
-}
 
 // Start begins watching for file changes
 func (w *Watcher) Start() {
@@ -293,13 +266,22 @@ func (w *Watcher) handleFileUpdate(path string) {
 	offset := w.offsets[path]
 
 	// Parse new content from offset
-	newCommands, newOffset, err := ParseSessionFileFrom(path, offset)
+	newCommands, meta, newOffset, err := ParseSessionFileFrom(path, offset)
 	if err != nil {
 		return
 	}
 
 	// Update offset
 	w.offsets[path] = newOffset
+
+	// Update session metadata if we now have better info
+	// This handles the case where the session was created before CWD was available
+	if meta.CWD != "" && session.ProjectPath != meta.CWD {
+		session.ProjectPath = meta.CWD
+	}
+	if meta.GitBranch != "" && session.GitBranch == "" {
+		session.GitBranch = meta.GitBranch
+	}
 
 	if len(newCommands) == 0 {
 		return
