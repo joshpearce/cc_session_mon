@@ -14,66 +14,472 @@ theme: frappe
 #   - color: catppuccin color name for styling (ignored if exclude is true)
 #   - bold: make text bold (optional)
 #
+# Pattern Format:
+#   Bash([sudo:]<command>[:<subcommand>]:*)
+#   - sudo is preserved as prefix when present
+#   - subcommands are captured for key tools (git, zfs, incus, etc.)
+#   - Examples: Bash(sudo:rm:*), Bash(git:push:*), Bash(ls:*)
+#
+# Security Classification Philosophy:
+#   - Groups ordered by decreasing risk/mutation potential
+#   - More specific patterns must come BEFORE less specific ones
+#   - Red/bold = destructive, privilege escalation, data loss risk
+#   - Peach/yellow = filesystem mutations, state changes
+#   - Maroon = network access, potential data exfiltration
+#   - Mauve = container/VM operations (isolated but powerful)
+#   - Blue = build/dev tools (local side effects)
+#   - Teal/green = read-only, safe operations
+#
 # Available catppuccin colors:
 #   rosewater, flamingo, pink, mauve, red, maroon, peach, yellow,
 #   green, teal, sky, sapphire, blue, lavender, text, subtext1, subtext0,
 #   overlay2, overlay1, overlay0, surface2, surface1, surface0, base, mantle, crust
+
 tool_groups:
-  # Dangerous commands - destructive operations
-  - name: dangerous
+  # ============================================================================
+  # CRITICAL - Destructive operations, privilege escalation, data loss risk
+  # Most specific patterns first!
+  # ============================================================================
+  - name: critical
     color: red
     bold: true
     patterns:
+      # ZFS destructive operations (specific subcommands)
+      - "Bash(sudo:zfs:destroy:*)"
+      - "Bash(sudo:zfs:rollback:*)"
+      - "Bash(sudo:zpool:destroy:*)"
+      - "Bash(zfs:destroy:*)"
+      - "Bash(zfs:rollback:*)"
+      - "Bash(zpool:destroy:*)"
+      # Git destructive operations (can lose work)
+      - "Bash(git:reset:*)"
+      - "Bash(git:clean:*)"
+      # Destructive file operations with sudo
+      - "Bash(sudo:rm:*)"
+      - "Bash(sudo:rmdir:*)"
+      # Destructive file operations without sudo
       - "Bash(rm:*)"
-      - "Bash(sudo:*)"
-      - "Bash(chmod:*)"
-      - "Bash(chown:*)"
+      - "Bash(rmdir:*)"
+      # Disk operations
+      - "Bash(sudo:dd:*)"
+      - "Bash(sudo:mkfs:*)"
+      - "Bash(sudo:fdisk:*)"
+      - "Bash(sudo:parted:*)"
       - "Bash(dd:*)"
       - "Bash(mkfs:*)"
+      # Process termination
+      - "Bash(sudo:kill:*)"
+      - "Bash(sudo:pkill:*)"
+      - "Bash(sudo:killall:*)"
       - "Bash(kill:*)"
       - "Bash(pkill:*)"
       - "Bash(killall:*)"
 
-  # File modifications - creates or overwrites files
-  - name: write
+  # ============================================================================
+  # PRIVILEGED - Sudo commands not caught above (still elevated risk)
+  # ============================================================================
+  - name: privileged
+    color: maroon
+    bold: true
+    patterns:
+      - "Bash(sudo:*)"
+
+  # ============================================================================
+  # PERMISSIONS - File permission and ownership changes
+  # ============================================================================
+  - name: permissions
+    color: red
+    patterns:
+      - "Bash(chmod:*)"
+      - "Bash(chown:*)"
+      - "Bash(chgrp:*)"
+      - "Bash(xattr:*)"
+
+  # ============================================================================
+  # FILE WRITE - File creation and overwrites via tool
+  # ============================================================================
+  - name: file-write
     color: peach
     patterns:
       - Write
       - NotebookEdit
 
-  # File edits - modifies existing files
-  - name: edit
+  # ============================================================================
+  # FILE EDIT - In-place file modifications via tool
+  # ============================================================================
+  - name: file-edit
     color: yellow
     patterns:
       - Edit
 
-  # Shell commands - can have side effects
-  - name: bash
+  # ============================================================================
+  # FILESYSTEM MUTATION - Shell commands that change filesystem state
+  # ============================================================================
+  - name: fs-mutate
+    color: peach
+    patterns:
+      - "Bash(mv:*)"
+      - "Bash(cp:*)"
+      - "Bash(mkdir:*)"
+      - "Bash(touch:*)"
+      - "Bash(ln:*)"
+      - "Bash(tar:*)"
+      - "Bash(unzip:*)"
+      - "Bash(gzip:*)"
+      - "Bash(gunzip:*)"
+
+  # ============================================================================
+  # GIT MUTATION - Git commands that change repository state
+  # Note: git:reset and git:clean are in critical section above
+  # ============================================================================
+  - name: git-mutate
+    color: yellow
+    patterns:
+      - "Bash(git:push:*)"
+      - "Bash(git:add:*)"
+      - "Bash(git:commit:*)"
+      - "Bash(git:merge:*)"
+      - "Bash(git:rebase:*)"
+      - "Bash(git:cherry-pick:*)"
+      - "Bash(git:checkout:*)"
+      - "Bash(git:switch:*)"
+      - "Bash(git:restore:*)"
+      - "Bash(git:stash:*)"
+      - "Bash(git:rm:*)"
+      - "Bash(git:init:*)"
+      - "Bash(git:clone:*)"
+
+  # ============================================================================
+  # GIT READ - Safe git operations (read-only)
+  # ============================================================================
+  - name: git-read
+    color: teal
+    patterns:
+      - "Bash(git:status:*)"
+      - "Bash(git:diff:*)"
+      - "Bash(git:log:*)"
+      - "Bash(git:show:*)"
+      - "Bash(git:branch:*)"
+      - "Bash(git:fetch:*)"
+      - "Bash(git:remote:*)"
+      - "Bash(git:describe:*)"
+      - "Bash(git:rev-parse:*)"
+      - "Bash(git:ls-files:*)"
+      - "Bash(git:ls-tree:*)"
+      - "Bash(git:*)"  # Catch-all for other git commands
+
+  # ============================================================================
+  # NETWORK - Remote access, data transfer, potential exfiltration
+  # ============================================================================
+  - name: network
+    color: flamingo
+    patterns:
+      - "Bash(ssh:*)"
+      - "Bash(scp:*)"
+      - "Bash(rsync:*)"
+      - "Bash(curl:*)"
+      - "Bash(wget:*)"
+      - "Bash(nc:*)"
+      - "Bash(netcat:*)"
+      - "Bash(sftp:*)"
+      - "Bash(ftp:*)"
+      - WebFetch
+      - WebSearch
+
+  # ============================================================================
+  # GITHUB - GitHub CLI operations
+  # ============================================================================
+  - name: github
+    color: pink
+    patterns:
+      - "Bash(gh:pr:*)"
+      - "Bash(gh:issue:*)"
+      - "Bash(gh:*)"
+
+  # ============================================================================
+  # CONTAINER/VM - Virtualization and container management
+  # ============================================================================
+  - name: container
     color: mauve
     patterns:
-      - "Bash(*)"
+      # Incus/LXD
+      - "Bash(incus:exec:*)"
+      - "Bash(incus:start:*)"
+      - "Bash(incus:stop:*)"
+      - "Bash(incus:delete:*)"
+      - "Bash(incus:*)"
+      - "Bash(lxc:*)"
+      # Podman/Docker
+      - "Bash(podman:*)"
+      - "Bash(docker:*)"
+      # Kubernetes
+      - "Bash(kubectl:delete:*)"
+      - "Bash(kubectl:apply:*)"
+      - "Bash(kubectl:*)"
+      - "Bash(helm:*)"
 
-  # Task/agent spawning
+  # ============================================================================
+  # SYSTEM ADMIN - Service and system management
+  # ============================================================================
+  - name: sysadmin
+    color: mauve
+    patterns:
+      - "Bash(systemctl:start:*)"
+      - "Bash(systemctl:stop:*)"
+      - "Bash(systemctl:restart:*)"
+      - "Bash(systemctl:*)"
+      - "Bash(journalctl:*)"
+      - "Bash(mount:*)"
+      - "Bash(umount:*)"
+      - "Bash(findmnt:*)"
+      # ZFS read/management (non-destructive - destructive are in critical)
+      - "Bash(zfs:list:*)"
+      - "Bash(zfs:get:*)"
+      - "Bash(zfs:*)"
+      - "Bash(zpool:status:*)"
+      - "Bash(zpool:list:*)"
+      - "Bash(zpool:*)"
+      # macOS system
+      - "Bash(defaults:write:*)"
+      - "Bash(defaults:read:*)"
+      - "Bash(defaults:*)"
+      - "Bash(plutil:*)"
+      - "Bash(codesign:*)"
+      - "Bash(networksetup:*)"
+      - "Bash(launchctl:*)"
+
+  # ============================================================================
+  # NIX - NixOS/Nix package manager
+  # ============================================================================
+  - name: nix
+    color: blue
+    patterns:
+      - "Bash(nix:build:*)"
+      - "Bash(nix:develop:*)"
+      - "Bash(nix:flake:*)"
+      - "Bash(nix:*)"
+      - "Bash(nix-*)"
+      - "Bash(nixos-rebuild:switch:*)"
+      - "Bash(nixos-rebuild:*)"
+      - "Bash(home-manager:*)"
+
+  # ============================================================================
+  # BUILD/DEV - Build tools and development commands
+  # ============================================================================
+  - name: build
+    color: blue
+    patterns:
+      # Build systems
+      - "Bash(make:build:*)"
+      - "Bash(make:test:*)"
+      - "Bash(make:*)"
+      - "Bash(cmake:*)"
+      - "Bash(cargo:build:*)"
+      - "Bash(cargo:test:*)"
+      - "Bash(cargo:*)"
+      # Go
+      - "Bash(go:build:*)"
+      - "Bash(go:test:*)"
+      - "Bash(go:run:*)"
+      - "Bash(go:mod:*)"
+      - "Bash(go:get:*)"
+      - "Bash(go:install:*)"
+      - "Bash(go:*)"
+      # Python
+      - "Bash(python:*)"
+      - "Bash(python3:*)"
+      - "Bash(pip:install:*)"
+      - "Bash(pip:*)"
+      - "Bash(uv:*)"
+      - "Bash(pytest:*)"
+      - "Bash(alembic:*)"
+      # Node
+      - "Bash(npm:install:*)"
+      - "Bash(npm:run:*)"
+      - "Bash(npm:*)"
+      - "Bash(yarn:*)"
+      - "Bash(pnpm:*)"
+      - "Bash(node:*)"
+      - "Bash(npx:*)"
+      # Package managers
+      - "Bash(brew:*)"
+      - "Bash(apt:*)"
+      - "Bash(apt-get:*)"
+
+  # ============================================================================
+  # LINTING - Code quality tools (safe, local analysis)
+  # ============================================================================
+  - name: lint
+    color: sapphire
+    patterns:
+      - "Bash(ruff:*)"
+      - "Bash(mypy:*)"
+      - "Bash(pyright:*)"
+      - "Bash(eslint:*)"
+      - "Bash(prettier:*)"
+      - "Bash(golangci-lint:*)"
+      - "Bash(pre-commit:*)"
+      - "Bash(shellcheck:*)"
+
+  # ============================================================================
+  # DATABASE - Database access and queries
+  # ============================================================================
+  - name: database
+    color: sapphire
+    patterns:
+      - "Bash(sqlite3:*)"
+      - "Bash(psql:*)"
+      - "Bash(mysql:*)"
+      - "Bash(mongosh:*)"
+      - "Bash(redis-cli:*)"
+
+  # ============================================================================
+  # TMUX - Terminal multiplexer (session management)
+  # ============================================================================
+  - name: tmux
+    color: lavender
+    patterns:
+      - "Bash(tmux:kill-session:*)"
+      - "Bash(tmux:send-keys:*)"
+      - "Bash(tmux:new-session:*)"
+      - "Bash(tmux:*)"
+
+  # ============================================================================
+  # TASK/AGENT - Claude agent spawning
+  # ============================================================================
   - name: task
     color: lavender
     patterns:
       - Task
       - TaskOutput
 
-  # Read-only operations - safe, no side effects
+  # ============================================================================
+  # SHELL TOOLS - Interactive/helper tools
+  # ============================================================================
+  - name: shell-tools
+    color: lavender
+    patterns:
+      - "Bash(bd:*)"
+      - "Bash(claude:*)"
+      - "Bash(expect:*)"
+      - "Bash(script:*)"
+
+  # ============================================================================
+  # PROCESS INFO - Process and system inspection (read-only)
+  # ============================================================================
+  - name: process-info
+    color: sky
+    patterns:
+      - "Bash(ps:*)"
+      - "Bash(top:*)"
+      - "Bash(htop:*)"
+      - "Bash(lsof:*)"
+      - "Bash(pgrep:*)"
+      - "Bash(fuser:*)"
+      - "Bash(pidstat:*)"
+      - "Bash(vmstat:*)"
+      - "Bash(iotop:*)"
+      - "Bash(free:*)"
+      - "Bash(uptime:*)"
+      - "Bash(who:*)"
+      - "Bash(whoami:*)"
+
+  # ============================================================================
+  # SYSTEM INFO - System inspection commands (read-only)
+  # ============================================================================
+  - name: system-info
+    color: sky
+    patterns:
+      - "Bash(uname:*)"
+      - "Bash(hostname:*)"
+      - "Bash(df:*)"
+      - "Bash(du:*)"
+      - "Bash(lsblk:*)"
+      - "Bash(blkid:*)"
+      - "Bash(lshw:*)"
+      - "Bash(dmidecode:*)"
+      - "Bash(ifconfig:*)"
+      - "Bash(ip:*)"
+      - "Bash(netstat:*)"
+      - "Bash(ss:*)"
+      - "Bash(env:*)"
+      - "Bash(printenv:*)"
+      - "Bash(date:*)"
+      - "Bash(arch:*)"
+
+  # ============================================================================
+  # FILE READ - File inspection commands (read-only)
+  # ============================================================================
+  - name: file-read
+    color: green
+    patterns:
+      - "Bash(ls:*)"
+      - "Bash(cat:*)"
+      - "Bash(head:*)"
+      - "Bash(tail:*)"
+      - "Bash(less:*)"
+      - "Bash(more:*)"
+      - "Bash(file:*)"
+      - "Bash(stat:*)"
+      - "Bash(wc:*)"
+      - "Bash(md5:*)"
+      - "Bash(sha256sum:*)"
+      - "Bash(xxd:*)"
+      - "Bash(od:*)"
+
+  # ============================================================================
+  # SEARCH - File and content search (read-only)
+  # ============================================================================
+  - name: search
+    color: green
+    patterns:
+      - "Bash(find:*)"
+      - "Bash(grep:*)"
+      - "Bash(rg:*)"
+      - "Bash(ag:*)"
+      - "Bash(fd:*)"
+      - "Bash(locate:*)"
+      - "Bash(mdfind:*)"
+      - "Bash(which:*)"
+      - "Bash(type:*)"
+      - "Bash(whereis:*)"
+
+  # ============================================================================
+  # READ-ONLY TOOLS - Claude's read-only tools
+  # ============================================================================
   - name: read-only
     color: green
     patterns:
       - Read
       - Glob
       - Grep
-      - WebFetch
-      - WebSearch
       - TodoRead
+      - TodoWrite
       - AskUserQuestion
+      - ExitPlanMode
+      - EnterPlanMode
+      - Skill
+      - KillShell
+
+  # ============================================================================
+  # MCP - Model Context Protocol tools
+  # ============================================================================
+  - name: mcp
+    color: sky
+    patterns:
       - "mcp__*"
 
-  # Catch-all for anything not matched above
+  # ============================================================================
+  # MISC BASH - Other bash commands not categorized
+  # ============================================================================
+  - name: bash-other
+    color: overlay2
+    patterns:
+      - "Bash(*)"
+
+  # ============================================================================
+  # CATCH-ALL - Anything not matched above
+  # ============================================================================
   - name: unmatched
     color: overlay1
     patterns:
