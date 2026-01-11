@@ -34,6 +34,11 @@ type Model struct {
 	commandList list.Model
 	patternList list.Model
 
+	// Delegates (stored to update width)
+	sessionDelegate *sessionDelegate
+	commandDelegate *commandDelegate
+	patternDelegate *patternDelegate
+
 	// Aggregated patterns across all sessions
 	patterns []*session.CommandPattern
 
@@ -50,29 +55,37 @@ func NewModel() Model {
 	projectsDir := filepath.Join(os.Getenv("HOME"), ".claude", "projects")
 	watcher, err := session.NewWatcher(projectsDir)
 
+	// Create delegates
+	sessionDel := newSessionDelegate()
+	commandDel := newCommandDelegate()
+	patternDel := newPatternDelegate()
+
 	m := Model{
-		watcher:   watcher,
-		viewMode:  ViewSessions,
-		activeIdx: 0,
-		err:       err,
+		watcher:         watcher,
+		viewMode:        ViewSessions,
+		activeIdx:       0,
+		err:             err,
+		sessionDelegate: sessionDel,
+		commandDelegate: commandDel,
+		patternDelegate: patternDel,
 	}
 
 	// Initialize list components with delegates
-	m.sessionList = list.New([]list.Item{}, newSessionDelegate(), 0, 0)
+	m.sessionList = list.New([]list.Item{}, sessionDel, 0, 0)
 	m.sessionList.Title = "Sessions"
 	m.sessionList.SetShowHelp(false)
 	m.sessionList.SetShowStatusBar(false)
 	m.sessionList.SetFilteringEnabled(false)
 	m.sessionList.DisableQuitKeybindings()
 
-	m.commandList = list.New([]list.Item{}, newCommandDelegate(), 0, 0)
+	m.commandList = list.New([]list.Item{}, commandDel, 0, 0)
 	m.commandList.Title = "Commands"
 	m.commandList.SetShowHelp(false)
 	m.commandList.SetShowStatusBar(false)
 	m.commandList.SetFilteringEnabled(false)
 	m.commandList.DisableQuitKeybindings()
 
-	m.patternList = list.New([]list.Item{}, newPatternDelegate(), 0, 0)
+	m.patternList = list.New([]list.Item{}, patternDel, 0, 0)
 	m.patternList.Title = "Unique Patterns"
 	m.patternList.SetShowHelp(false)
 	m.patternList.SetShowStatusBar(false)
@@ -127,7 +140,7 @@ func (m Model) watchSessionsCmd() tea.Cmd {
 	}
 }
 
-// tickCmd returns a command that ticks every 30 seconds to refresh activity status
+// tickCmd returns a command that ticks every 30 seconds to refresh timestamps
 func (m Model) tickCmd() tea.Cmd {
 	return tea.Tick(30*time.Second, func(t time.Time) tea.Msg {
 		return tickMsg(t)
@@ -152,12 +165,30 @@ func (m Model) updateCommandList() Model {
 	}
 
 	sess := m.sessions[m.activeIdx]
-	items := make([]list.Item, len(sess.Commands))
-	for i, c := range sess.Commands {
+
+	// Remember if user was at the top (following tail)
+	wasAtTop := m.commandList.Index() == 0
+	previousCount := len(m.commandList.Items())
+
+	// Sort commands by timestamp descending (newest first)
+	commands := make([]session.CommandEntry, len(sess.Commands))
+	copy(commands, sess.Commands)
+	sort.Slice(commands, func(i, j int) bool {
+		return commands[i].Timestamp.After(commands[j].Timestamp)
+	})
+
+	items := make([]list.Item, len(commands))
+	for i, c := range commands {
 		items[i] = commandItem{command: c}
 	}
 	m.commandList.SetItems(items)
 	m.commandList.Title = "Commands - " + filepath.Base(sess.ProjectPath)
+
+	// Only auto-scroll to top if user was already at top, or this is initial load
+	if wasAtTop || previousCount == 0 {
+		m.commandList.Select(0)
+	}
+
 	return m
 }
 
@@ -227,6 +258,11 @@ func (m Model) updateListSizes() Model {
 	if listWidth < 20 {
 		listWidth = 20
 	}
+
+	// Update delegate widths
+	m.sessionDelegate.SetWidth(listWidth)
+	m.commandDelegate.SetWidth(listWidth)
+	m.patternDelegate.SetWidth(listWidth)
 
 	m.sessionList.SetSize(listWidth, listHeight)
 	m.commandList.SetSize(listWidth, listHeight)

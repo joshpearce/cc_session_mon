@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"cc_session_mon/internal/session"
@@ -37,44 +38,73 @@ func (i sessionItem) Description() string {
 }
 
 // sessionDelegate renders session items
-type sessionDelegate struct{}
-
-func newSessionDelegate() sessionDelegate {
-	return sessionDelegate{}
+type sessionDelegate struct {
+	width int
 }
 
-func (d sessionDelegate) Height() int                             { return 2 }
-func (d sessionDelegate) Spacing() int                            { return 1 }
-func (d sessionDelegate) Update(_ tea.Msg, _ *list.Model) tea.Cmd { return nil }
-func (d sessionDelegate) Render(w io.Writer, m list.Model, index int, item list.Item) {
+func newSessionDelegate() *sessionDelegate {
+	return &sessionDelegate{width: 80}
+}
+
+func (d *sessionDelegate) SetWidth(w int) {
+	d.width = w
+}
+
+func (d *sessionDelegate) Height() int                             { return 1 }
+func (d *sessionDelegate) Spacing() int                            { return 0 }
+func (d *sessionDelegate) Update(_ tea.Msg, _ *list.Model) tea.Cmd { return nil }
+func (d *sessionDelegate) Render(w io.Writer, m list.Model, index int, item list.Item) {
 	i, ok := item.(sessionItem)
 	if !ok {
 		return
 	}
 
-	// Activity indicator
+	// Build the row content
 	var indicator string
-	var nameStyle lipgloss.Style
 	if i.session.IsActive {
-		indicator = activeSessionStyle.Render("● ")
-		nameStyle = activeSessionStyle
+		indicator = "● "
 	} else {
-		indicator = inactiveSessionStyle.Render("  ")
-		nameStyle = inactiveSessionStyle
+		indicator = "  "
 	}
 
-	// Selection highlight
-	if index == m.Index() {
-		nameStyle = selectedItemStyle
-	}
-
-	name := nameStyle.Render(filepath.Base(i.session.ProjectPath))
-	desc := mutedStyle.Render(fmt.Sprintf("  %d commands | %s",
+	name := i.session.ProjectPath
+	info := fmt.Sprintf(" %d cmds | %s",
 		len(i.session.Commands),
 		formatTimeAgo(i.session.LastActivity),
-	))
+	)
 
-	fmt.Fprintf(w, "%s%s\n%s", indicator, name, desc)
+	// Calculate available space for name
+	availableWidth := d.width - len(indicator) - len(info) - 2
+	if availableWidth < 10 {
+		availableWidth = 10
+	}
+
+	// Truncate or pad name
+	if len(name) > availableWidth {
+		name = name[:availableWidth-3] + "..."
+	}
+
+	row := indicator + name + strings.Repeat(" ", max(0, availableWidth-len(name))) + info
+
+	// Apply styling
+	var style lipgloss.Style
+	if index == m.Index() {
+		style = lipgloss.NewStyle().
+			Background(GetTheme().Surface).
+			Foreground(GetTheme().Text).
+			Bold(true).
+			Width(d.width)
+	} else if i.session.IsActive {
+		style = lipgloss.NewStyle().
+			Foreground(GetTheme().Secondary).
+			Width(d.width)
+	} else {
+		style = lipgloss.NewStyle().
+			Foreground(GetTheme().Muted).
+			Width(d.width)
+	}
+
+	fmt.Fprint(w, style.Render(row))
 }
 
 // ============================================================================
@@ -88,35 +118,80 @@ type commandItem struct {
 
 func (i commandItem) FilterValue() string { return i.command.RawCommand }
 func (i commandItem) Title() string       { return i.command.Pattern }
-func (i commandItem) Description() string { return truncate(i.command.RawCommand, 60) }
+func (i commandItem) Description() string { return i.command.RawCommand }
 
 // commandDelegate renders command items
-type commandDelegate struct{}
-
-func newCommandDelegate() commandDelegate {
-	return commandDelegate{}
+type commandDelegate struct {
+	width int
 }
 
-func (d commandDelegate) Height() int                             { return 2 }
-func (d commandDelegate) Spacing() int                            { return 0 }
-func (d commandDelegate) Update(_ tea.Msg, _ *list.Model) tea.Cmd { return nil }
-func (d commandDelegate) Render(w io.Writer, m list.Model, index int, item list.Item) {
+func newCommandDelegate() *commandDelegate {
+	return &commandDelegate{width: 80}
+}
+
+func (d *commandDelegate) SetWidth(w int) {
+	d.width = w
+}
+
+func (d *commandDelegate) Height() int                             { return 1 }
+func (d *commandDelegate) Spacing() int                            { return 0 }
+func (d *commandDelegate) Update(_ tea.Msg, _ *list.Model) tea.Cmd { return nil }
+func (d *commandDelegate) Render(w io.Writer, m list.Model, index int, item list.Item) {
 	i, ok := item.(commandItem)
 	if !ok {
 		return
 	}
 
-	// Get style based on tool/pattern
-	style := StyleForTool(i.command.ToolName, i.command.Pattern)
-	if index == m.Index() {
-		style = style.Background(lipgloss.Color("#374151"))
+	// Format: "Jan 02 15:04  Pattern  command..."
+	timestamp := i.command.Timestamp.Format("Jan 02 15:04")
+	pattern := i.command.Pattern
+
+	// Fixed widths for timestamp and pattern
+	timestampWidth := 12
+	patternWidth := 20
+
+	// Pad/truncate pattern to fixed width
+	if len(pattern) > patternWidth {
+		pattern = pattern[:patternWidth-1] + "…"
+	} else {
+		pattern = pattern + strings.Repeat(" ", patternWidth-len(pattern))
 	}
 
-	timestamp := timestampStyle.Render(i.command.Timestamp.Format("15:04:05"))
-	pattern := style.Render(i.command.Pattern)
-	raw := truncate(i.command.RawCommand, 50)
+	// Calculate space for raw command
+	// Format: "timestamp  pattern  command"
+	fixedWidth := timestampWidth + 2 + patternWidth + 2
+	commandWidth := d.width - fixedWidth
+	if commandWidth < 10 {
+		commandWidth = 10
+	}
 
-	fmt.Fprintf(w, "%s %s\n   %s", timestamp, pattern, mutedStyle.Render(raw))
+	// Replace newlines with visible marker to keep single-line display
+	rawCmd := strings.ReplaceAll(i.command.RawCommand, "\n", "↵")
+	if len(rawCmd) > commandWidth {
+		rawCmd = rawCmd[:commandWidth-1] + "…"
+	}
+
+	row := fmt.Sprintf("%s  %s  %s", timestamp, pattern, rawCmd)
+
+	// Pad to full width
+	if len(row) < d.width {
+		row = row + strings.Repeat(" ", d.width-len(row))
+	}
+
+	// Apply styling based on selection and tool type
+	var style lipgloss.Style
+	baseStyle := StyleForTool(i.command.ToolName, i.command.Pattern)
+
+	if index == m.Index() {
+		style = baseStyle.
+			Background(GetTheme().Surface).
+			Bold(true).
+			Width(d.width)
+	} else {
+		style = baseStyle.Width(d.width)
+	}
+
+	fmt.Fprint(w, style.Render(row))
 }
 
 // ============================================================================
@@ -135,37 +210,81 @@ func (i patternItem) Description() string {
 }
 
 // patternDelegate renders pattern items
-type patternDelegate struct{}
-
-func newPatternDelegate() patternDelegate {
-	return patternDelegate{}
+type patternDelegate struct {
+	width int
 }
 
-func (d patternDelegate) Height() int                             { return 2 }
-func (d patternDelegate) Spacing() int                            { return 0 }
-func (d patternDelegate) Update(_ tea.Msg, _ *list.Model) tea.Cmd { return nil }
-func (d patternDelegate) Render(w io.Writer, m list.Model, index int, item list.Item) {
+func newPatternDelegate() *patternDelegate {
+	return &patternDelegate{width: 80}
+}
+
+func (d *patternDelegate) SetWidth(w int) {
+	d.width = w
+}
+
+func (d *patternDelegate) Height() int                             { return 1 }
+func (d *patternDelegate) Spacing() int                            { return 0 }
+func (d *patternDelegate) Update(_ tea.Msg, _ *list.Model) tea.Cmd { return nil }
+func (d *patternDelegate) Render(w io.Writer, m list.Model, index int, item list.Item) {
 	i, ok := item.(patternItem)
 	if !ok {
 		return
 	}
 
-	// Get style based on tool/pattern
-	style := StyleForTool(i.pattern.ToolName, i.pattern.Pattern)
-	if index == m.Index() {
-		style = style.Background(lipgloss.Color("#374151"))
+	// Format: "Pattern  [count]  example..."
+	pattern := i.pattern.Pattern
+	countStr := fmt.Sprintf("[%d]", i.pattern.Count)
+
+	// Fixed widths
+	patternWidth := 25
+	countWidth := 8
+
+	// Pad/truncate pattern
+	if len(pattern) > patternWidth {
+		pattern = pattern[:patternWidth-1] + "…"
+	} else {
+		pattern = pattern + strings.Repeat(" ", patternWidth-len(pattern))
 	}
 
-	pattern := style.Render(i.pattern.Pattern)
-	count := countBadgeStyle.Render(fmt.Sprintf("%d", i.pattern.Count))
+	// Pad count
+	countStr = strings.Repeat(" ", countWidth-len(countStr)) + countStr
 
-	// Show first example if available
+	// Calculate space for example
+	fixedWidth := patternWidth + 2 + countWidth + 2
+	exampleWidth := d.width - fixedWidth
+	if exampleWidth < 10 {
+		exampleWidth = 10
+	}
+
 	example := ""
 	if len(i.pattern.Examples) > 0 {
-		example = truncate(i.pattern.Examples[0], 40)
+		example = i.pattern.Examples[0]
+		if len(example) > exampleWidth {
+			example = example[:exampleWidth-1] + "…"
+		}
 	}
 
-	fmt.Fprintf(w, "%s %s\n   %s", pattern, count, exampleStyle.Render(example))
+	row := fmt.Sprintf("%s  %s  %s", pattern, countStr, example)
+
+	// Pad to full width
+	if len(row) < d.width {
+		row = row + strings.Repeat(" ", d.width-len(row))
+	}
+
+	// Apply styling
+	var style lipgloss.Style
+	baseStyle := StyleForTool(i.pattern.ToolName, i.pattern.Pattern)
+
+	if index == m.Index() {
+		style = baseStyle.
+			Background(GetTheme().Surface).
+			Bold(true).
+			Width(d.width)
+	} else {
+		style = baseStyle.Width(d.width)
+	}
+
+	fmt.Fprint(w, style.Render(row))
 }
 
 // ============================================================================
@@ -195,16 +314,7 @@ func formatTimeAgo(t time.Time) string {
 	}
 }
 
-// truncate shortens a string to max length with ellipsis
-func truncate(s string, maxLen int) string {
-	if len(s) <= maxLen {
-		return s
-	}
-	if maxLen < 4 {
-		return s[:maxLen]
-	}
-	return s[:maxLen-3] + "..."
+// MutedStyle returns a style for description text
+func MutedStyle() lipgloss.Style {
+	return lipgloss.NewStyle().Foreground(GetTheme().Muted)
 }
-
-// mutedStyle for description text
-var mutedStyle = lipgloss.NewStyle().Foreground(mutedColor)

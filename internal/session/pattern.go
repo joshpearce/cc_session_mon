@@ -1,27 +1,19 @@
 package session
 
 import (
+	"cc_session_mon/internal/config"
 	"strings"
 )
 
-// WriteOperationTools lists tools that modify files or system state
-var WriteOperationTools = map[string]bool{
-	"Bash":         true,
-	"Edit":         true,
-	"Write":        true,
-	"NotebookEdit": true,
+// IsWriteOperation returns true for operations that are NOT read-only
+// Uses an exclude list: anything not in the read-only list is considered a write operation
+func IsWriteOperation(toolName string) bool {
+	return !config.Global().IsReadOnlyTool(toolName)
 }
 
-// DangerousPatterns lists patterns that warrant extra attention
-var DangerousPatterns = map[string]bool{
-	"Bash(rm:*)":    true,
-	"Bash(sudo:*)":  true,
-	"Bash(chmod:*)": true,
-	"Bash(chown:*)": true,
-	"Bash(mv:*)":    true,
-	"Bash(dd:*)":    true,
-	"Bash(mkfs:*)":  true,
-	"Bash(kill:*)":  true,
+// IsDangerousPattern returns true for patterns that warrant extra attention
+func IsDangerousPattern(pattern string) bool {
+	return config.Global().IsDangerousPattern(pattern)
 }
 
 // ExtractPattern converts a tool call into Claude permission pattern format
@@ -130,14 +122,4 @@ func extractBashPattern(command string) string {
 	}
 
 	return "Bash(" + firstWord + ":*)"
-}
-
-// IsWriteOperation returns true for operations that modify files/system
-func IsWriteOperation(toolName string) bool {
-	return WriteOperationTools[toolName]
-}
-
-// IsDangerousPattern returns true for patterns that warrant extra attention
-func IsDangerousPattern(pattern string) bool {
-	return DangerousPatterns[pattern]
 }

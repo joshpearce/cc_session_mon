@@ -123,6 +123,10 @@ func ParseSessionFile(path string) ([]CommandEntry, string, error) {
 					entry.RawCommand = input.FilePath
 					entry.Pattern = content.Name
 				}
+			default:
+				// For other tools, use the tool name as both pattern and command
+				entry.Pattern = content.Name
+				entry.RawCommand = content.Name
 			}
 
 			// Only add if we got a valid command/path
@@ -205,6 +209,10 @@ func ParseSessionFileFrom(path string, offset int64) ([]CommandEntry, int64, err
 					entry.RawCommand = input.FilePath
 					entry.Pattern = content.Name
 				}
+			default:
+				// For other tools, use the tool name as both pattern and command
+				entry.Pattern = content.Name
+				entry.RawCommand = content.Name
 			}
 
 			if entry.RawCommand != "" {

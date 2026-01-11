@@ -1,6 +1,10 @@
 package session
 
-import "testing"
+import (
+	"testing"
+
+	"cc_session_mon/internal/config"
+)
 
 func TestExtractPattern(t *testing.T) {
 	tests := []struct {
@@ -51,14 +55,30 @@ func TestExtractPattern(t *testing.T) {
 }
 
 func TestIsWriteOperation(t *testing.T) {
+	// Set up a known config for testing
+	config.SetGlobal(&config.Config{
+		ReadOnlyTools: []string{
+			"Read",
+			"Glob",
+			"Grep",
+			"WebFetch",
+		},
+		DangerousPatterns: []string{},
+	})
+
 	tests := []struct {
 		toolName string
 		expected bool
 	}{
+		// Tools NOT in read-only list = write operations
 		{"Bash", true},
 		{"Edit", true},
 		{"Write", true},
 		{"NotebookEdit", true},
+		{"Task", true},       // Not in test config's read-only list
+		{"SomeNewTool", true}, // Unknown tools are treated as write ops
+
+		// Tools IN read-only list = not write operations
 		{"Read", false},
 		{"Grep", false},
 		{"Glob", false},
@@ -77,6 +97,16 @@ func TestIsWriteOperation(t *testing.T) {
 }
 
 func TestIsDangerousPattern(t *testing.T) {
+	// Set up a known config for testing
+	config.SetGlobal(&config.Config{
+		ReadOnlyTools: []string{},
+		DangerousPatterns: []string{
+			"Bash(rm:*)",
+			"Bash(sudo:*)",
+			"Bash(chmod:*)",
+		},
+	})
+
 	tests := []struct {
 		pattern  string
 		expected bool

@@ -1,146 +1,221 @@
 package tui
 
-import "github.com/charmbracelet/lipgloss"
+import (
+	"cc_session_mon/internal/config"
 
-// Color palette
-var (
-	primaryColor   = lipgloss.Color("#7C3AED") // Purple
-	secondaryColor = lipgloss.Color("#10B981") // Green
-	warningColor   = lipgloss.Color("#F59E0B") // Amber
-	dangerColor    = lipgloss.Color("#EF4444") // Red
-	mutedColor     = lipgloss.Color("#6B7280") // Gray
-	bgColor        = lipgloss.Color("#1F2937") // Dark background
-	fgColor        = lipgloss.Color("#F9FAFB") // Light foreground
+	catppuccin "github.com/catppuccin/go"
+	"github.com/charmbracelet/lipgloss"
 )
 
-// Header styles
-var (
-	titleStyle = lipgloss.NewStyle().
-			Bold(true).
-			Foreground(primaryColor)
+// Theme holds the current color palette
+type Theme struct {
+	Primary   lipgloss.Color
+	Secondary lipgloss.Color
+	Warning   lipgloss.Color
+	Danger    lipgloss.Color
+	Muted     lipgloss.Color
+	Surface   lipgloss.Color
+	Base      lipgloss.Color
+	Text      lipgloss.Color
+}
 
-	statusStyle = lipgloss.NewStyle().
-			Foreground(mutedColor)
+// currentTheme is the active theme
+var currentTheme *Theme
 
-	activeIndicatorStyle = lipgloss.NewStyle().
-				Foreground(secondaryColor).
-				Bold(true)
+// GetTheme returns the current theme, initializing if needed
+func GetTheme() *Theme {
+	if currentTheme == nil {
+		currentTheme = loadTheme(config.Global().Theme)
+	}
+	return currentTheme
+}
 
-	inactiveIndicatorStyle = lipgloss.NewStyle().
-				Foreground(mutedColor)
+// loadTheme creates a Theme from a catppuccin flavor name
+func loadTheme(name string) *Theme {
+	var flavor catppuccin.Flavor
 
-	errorStyle = lipgloss.NewStyle().
-			Foreground(dangerColor).
-			Bold(true).
-			Padding(1)
-)
+	switch name {
+	case "latte":
+		flavor = catppuccin.Latte
+	case "frappe":
+		flavor = catppuccin.Frappe
+	case "macchiato":
+		flavor = catppuccin.Macchiato
+	case "mocha":
+		flavor = catppuccin.Mocha
+	default:
+		flavor = catppuccin.Mocha
+	}
 
-// Tab styles
-var (
-	activeTabStyle = lipgloss.NewStyle().
-			Bold(true).
-			Background(primaryColor).
-			Foreground(fgColor).
-			Padding(0, 2)
+	return &Theme{
+		Primary:   lipgloss.Color(flavor.Mauve().Hex),
+		Secondary: lipgloss.Color(flavor.Green().Hex),
+		Warning:   lipgloss.Color(flavor.Yellow().Hex),
+		Danger:    lipgloss.Color(flavor.Red().Hex),
+		Muted:     lipgloss.Color(flavor.Overlay0().Hex),
+		Surface:   lipgloss.Color(flavor.Surface0().Hex),
+		Base:      lipgloss.Color(flavor.Base().Hex),
+		Text:      lipgloss.Color(flavor.Text().Hex),
+	}
+}
 
-	inactiveTabStyle = lipgloss.NewStyle().
-				Foreground(mutedColor).
-				Padding(0, 2)
+// Style accessors - these create styles dynamically based on current theme
 
-	tabGapStyle = lipgloss.NewStyle().
-			Foreground(mutedColor)
-)
+func TitleStyle() lipgloss.Style {
+	t := GetTheme()
+	return lipgloss.NewStyle().
+		Bold(true).
+		Foreground(t.Primary)
+}
 
-// List item styles
-var (
-	selectedItemStyle = lipgloss.NewStyle().
-				Background(lipgloss.Color("#374151")).
-				Foreground(fgColor).
-				Bold(true)
+func StatusStyle() lipgloss.Style {
+	t := GetTheme()
+	return lipgloss.NewStyle().
+		Foreground(t.Muted)
+}
 
-	normalItemStyle = lipgloss.NewStyle().
-			Foreground(fgColor)
+func ActiveIndicatorStyle() lipgloss.Style {
+	t := GetTheme()
+	return lipgloss.NewStyle().
+		Foreground(t.Secondary).
+		Bold(true)
+}
 
-	// Active session indicator
-	activeSessionStyle = lipgloss.NewStyle().
-				Foreground(secondaryColor).
-				Bold(true)
+func InactiveIndicatorStyle() lipgloss.Style {
+	t := GetTheme()
+	return lipgloss.NewStyle().
+		Foreground(t.Muted)
+}
 
-	inactiveSessionStyle = lipgloss.NewStyle().
-				Foreground(mutedColor)
-)
+func ErrorStyle() lipgloss.Style {
+	t := GetTheme()
+	return lipgloss.NewStyle().
+		Foreground(t.Danger).
+		Bold(true).
+		Padding(1)
+}
 
-// Tool-specific styles
-var (
-	bashStyle = lipgloss.NewStyle().
-			Foreground(warningColor)
+func ActiveTabStyle() lipgloss.Style {
+	t := GetTheme()
+	return lipgloss.NewStyle().
+		Bold(true).
+		Background(t.Primary).
+		Foreground(t.Base).
+		Padding(0, 2)
+}
 
-	editStyle = lipgloss.NewStyle().
-			Foreground(secondaryColor)
+func InactiveTabStyle() lipgloss.Style {
+	t := GetTheme()
+	return lipgloss.NewStyle().
+		Foreground(t.Muted).
+		Padding(0, 2)
+}
 
-	writeStyle = lipgloss.NewStyle().
-			Foreground(primaryColor)
+func TabGapStyle() lipgloss.Style {
+	t := GetTheme()
+	return lipgloss.NewStyle().
+		Foreground(t.Muted)
+}
 
-	dangerousStyle = lipgloss.NewStyle().
-			Foreground(dangerColor).
-			Bold(true)
-)
+func SelectedItemStyle() lipgloss.Style {
+	t := GetTheme()
+	return lipgloss.NewStyle().
+		Background(t.Surface).
+		Foreground(t.Text).
+		Bold(true)
+}
 
-// Pattern styles
-var (
-	countBadgeStyle = lipgloss.NewStyle().
-			Background(primaryColor).
-			Foreground(fgColor).
-			Padding(0, 1)
+func NormalItemStyle() lipgloss.Style {
+	t := GetTheme()
+	return lipgloss.NewStyle().
+		Foreground(t.Text)
+}
 
-	exampleStyle = lipgloss.NewStyle().
-			Foreground(mutedColor).
-			Italic(true)
-)
+func ActiveSessionStyle() lipgloss.Style {
+	t := GetTheme()
+	return lipgloss.NewStyle().
+		Foreground(t.Secondary).
+		Bold(true)
+}
 
-// Help style
-var (
-	helpStyle = lipgloss.NewStyle().
-			Foreground(mutedColor)
-)
+func InactiveSessionStyle() lipgloss.Style {
+	t := GetTheme()
+	return lipgloss.NewStyle().
+		Foreground(t.Muted)
+}
 
-// Timestamp style
-var (
-	timestampStyle = lipgloss.NewStyle().
-			Foreground(mutedColor).
-			Width(8)
-)
+func BashStyle() lipgloss.Style {
+	t := GetTheme()
+	return lipgloss.NewStyle().
+		Foreground(t.Warning)
+}
+
+func EditStyle() lipgloss.Style {
+	t := GetTheme()
+	return lipgloss.NewStyle().
+		Foreground(t.Secondary)
+}
+
+func WriteStyle() lipgloss.Style {
+	t := GetTheme()
+	return lipgloss.NewStyle().
+		Foreground(t.Primary)
+}
+
+func DangerousStyle() lipgloss.Style {
+	t := GetTheme()
+	return lipgloss.NewStyle().
+		Foreground(t.Danger).
+		Bold(true)
+}
+
+func CountBadgeStyle() lipgloss.Style {
+	t := GetTheme()
+	return lipgloss.NewStyle().
+		Background(t.Primary).
+		Foreground(t.Base).
+		Padding(0, 1)
+}
+
+func ExampleStyle() lipgloss.Style {
+	t := GetTheme()
+	return lipgloss.NewStyle().
+		Foreground(t.Muted).
+		Italic(true)
+}
+
+func HelpStyle() lipgloss.Style {
+	t := GetTheme()
+	return lipgloss.NewStyle().
+		Foreground(t.Muted)
+}
+
+func TimestampStyle() lipgloss.Style {
+	t := GetTheme()
+	return lipgloss.NewStyle().
+		Foreground(t.Muted).
+		Width(8)
+}
 
 // StyleForTool returns appropriate style based on tool and pattern
 func StyleForTool(toolName, pattern string) lipgloss.Style {
-	// Highlight dangerous patterns
 	if IsDangerousPattern(pattern) {
-		return dangerousStyle
+		return DangerousStyle()
 	}
 
 	switch toolName {
 	case "Bash":
-		return bashStyle
+		return BashStyle()
 	case "Edit":
-		return editStyle
+		return EditStyle()
 	case "Write":
-		return writeStyle
+		return WriteStyle()
 	default:
-		return normalItemStyle
+		return NormalItemStyle()
 	}
 }
 
 // IsDangerousPattern checks if a pattern warrants extra attention
 func IsDangerousPattern(pattern string) bool {
-	dangerous := map[string]bool{
-		"Bash(rm:*)":    true,
-		"Bash(sudo:*)":  true,
-		"Bash(chmod:*)": true,
-		"Bash(chown:*)": true,
-		"Bash(mv:*)":    true,
-		"Bash(dd:*)":    true,
-		"Bash(mkfs:*)":  true,
-		"Bash(kill:*)":  true,
-	}
-	return dangerous[pattern]
+	return config.Global().IsDangerousPattern(pattern)
 }

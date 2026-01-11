@@ -22,8 +22,9 @@ type WatchEvent struct {
 type Watcher struct {
 	fsWatcher   *fsnotify.Watcher
 	projectsDir string
-	sessions    map[string]*Session // keyed by file path
+	sessions    map[string]*Session // keyed by main session file path
 	offsets     map[string]int64    // file read offsets for incremental parsing
+	subagentMap map[string]string   // maps subagent file path -> main session file path
 	mu          sync.RWMutex
 
 	Events chan WatchEvent
@@ -43,6 +44,7 @@ func NewWatcher(projectsDir string) (*Watcher, error) {
 		projectsDir: projectsDir,
 		sessions:    make(map[string]*Session),
 		offsets:     make(map[string]int64),
+		subagentMap: make(map[string]string),
 		Events:      make(chan WatchEvent, 100),
 		Errors:      make(chan error, 10),
 		done:        make(chan struct{}),
@@ -86,6 +88,22 @@ func (w *Watcher) DiscoverSessions() ([]*Session, error) {
 				if info, err := os.Stat(jsonlPath); err == nil {
 					w.offsets[jsonlPath] = info.Size()
 				}
+
+				// Watch and track subagent files
+				sessionID := strings.TrimSuffix(filepath.Base(jsonlPath), ".jsonl")
+				subagentDir := filepath.Join(projectDir, sessionID, "subagents")
+				if subagentFiles, err := filepath.Glob(filepath.Join(subagentDir, "*.jsonl")); err == nil {
+					for _, subPath := range subagentFiles {
+						w.subagentMap[subPath] = jsonlPath
+						if info, err := os.Stat(subPath); err == nil {
+							w.offsets[subPath] = info.Size()
+						}
+					}
+					// Watch the subagent directory for new files
+					if len(subagentFiles) > 0 {
+						w.fsWatcher.Add(subagentDir)
+					}
+				}
 			}
 		}
 
@@ -117,11 +135,25 @@ func (w *Watcher) parseSessionFile(path, encodedProject string) *Session {
 	// Extract session ID from filename
 	sessionID := strings.TrimSuffix(filepath.Base(path), ".jsonl")
 
-	// Parse the session file
+	// Parse the main session file
 	commands, gitBranch, err := ParseSessionFile(path)
 	if err != nil {
 		return nil
 	}
+
+	// Also parse subagent files if they exist
+	subagentDir := filepath.Join(filepath.Dir(path), sessionID, "subagents")
+	if subagentFiles, err := filepath.Glob(filepath.Join(subagentDir, "*.jsonl")); err == nil {
+		for _, subagentPath := range subagentFiles {
+			subCommands, _, _ := ParseSessionFile(subagentPath)
+			commands = append(commands, subCommands...)
+		}
+	}
+
+	// Sort all commands by timestamp
+	sort.Slice(commands, func(i, j int) bool {
+		return commands[i].Timestamp.Before(commands[j].Timestamp)
+	})
 
 	// Determine last activity time
 	lastActivity := info.ModTime()
@@ -132,8 +164,15 @@ func (w *Watcher) parseSessionFile(path, encodedProject string) *Session {
 		}
 	}
 
+	// Check subagent directory for recent modifications too
+	if subagentInfo, err := os.Stat(subagentDir); err == nil {
+		if subagentInfo.ModTime().After(info.ModTime()) {
+			lastActivity = subagentInfo.ModTime()
+		}
+	}
+
 	// Consider active if modified in last 5 minutes
-	isActive := time.Since(info.ModTime()) < 5*time.Minute
+	isActive := time.Since(lastActivity) < 5*time.Minute
 
 	return &Session{
 		ID:           sessionID,
@@ -147,20 +186,24 @@ func (w *Watcher) parseSessionFile(path, encodedProject string) *Session {
 }
 
 // decodeProjectPath converts directory name to path
-// e.g., "-Users-josh-code-project" -> "/Users/josh/code/project"
+// Encoding: single dash = path separator, double dash = literal dash
+// e.g., "-Users-josh-code-cc--session--mon" -> "/Users/josh/code/cc-session-mon"
 func decodeProjectPath(encoded string) string {
 	if encoded == "" {
 		return ""
 	}
 
-	// Handle the leading dash which represents root "/"
-	if strings.HasPrefix(encoded, "-") {
-		// Replace dashes with slashes, but be careful with multiple consecutive dashes
-		path := "/" + strings.ReplaceAll(encoded[1:], "-", "/")
-		return path
-	}
+	// Use a placeholder for double-dash (literal dash) to avoid confusion
+	const placeholder = "\x00"
+	result := strings.ReplaceAll(encoded, "--", placeholder)
 
-	return "/" + strings.ReplaceAll(encoded, "-", "/")
+	// Replace single dashes with path separators
+	result = strings.ReplaceAll(result, "-", "/")
+
+	// Restore literal dashes from placeholder
+	result = strings.ReplaceAll(result, placeholder, "-")
+
+	return result
 }
 
 // Start begins watching for file changes
@@ -221,7 +264,17 @@ func (w *Watcher) handleFileUpdate(path string) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
-	session, exists := w.sessions[path]
+	// Check if this is a subagent file
+	mainSessionPath, isSubagent := w.subagentMap[path]
+	var session *Session
+	var exists bool
+
+	if isSubagent {
+		session, exists = w.sessions[mainSessionPath]
+	} else {
+		session, exists = w.sessions[path]
+	}
+
 	if !exists {
 		return
 	}
@@ -264,6 +317,45 @@ func (w *Watcher) handleNewFile(path string) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
+	// Check if this is a new subagent file
+	dir := filepath.Dir(path)
+	if filepath.Base(dir) == "subagents" {
+		// This is a subagent file - find the parent session
+		sessionDir := filepath.Dir(dir)
+		sessionID := filepath.Base(sessionDir)
+		projectDir := filepath.Dir(sessionDir)
+
+		// Look for the main session file
+		mainSessionPath := filepath.Join(projectDir, sessionID+".jsonl")
+		if session, exists := w.sessions[mainSessionPath]; exists {
+			// Track this subagent file
+			w.subagentMap[path] = mainSessionPath
+			if info, err := os.Stat(path); err == nil {
+				w.offsets[path] = info.Size()
+			}
+
+			// Parse and add its commands to the session
+			commands, _, _ := ParseSessionFile(path)
+			if len(commands) > 0 {
+				session.Commands = append(session.Commands, commands...)
+				session.LastActivity = time.Now()
+				session.IsActive = true
+
+				// Send event
+				select {
+				case w.Events <- WatchEvent{
+					Type:     "new_commands",
+					Session:  session,
+					Commands: commands,
+				}:
+				default:
+				}
+			}
+		}
+		return
+	}
+
+	// Regular session file
 	// Already tracking this file?
 	if _, exists := w.sessions[path]; exists {
 		return

@@ -1,0 +1,30 @@
+# cc_session_mon configuration
+
+# Theme: mocha (darkest), macchiato, frappe, latte (lightest)
+# All themes are from the Catppuccin color palette
+theme: frappe
+
+# Tools listed here are considered read-only and will be excluded from monitoring.
+# Any tool NOT in this list will be shown as a state-changing operation.
+read_only_tools:
+  - Read
+  - Glob
+  - Grep
+  - WebFetch
+  - WebSearch
+  - Task
+  - TaskOutput
+  - TodoRead
+  - AskUserQuestion
+  - mcp__ide__getDiagnostics
+
+# Patterns that warrant extra visual attention (highlighted in the UI)
+dangerous_patterns:
+  - "Bash(rm:*)"
+  - "Bash(sudo:*)"
+  - "Bash(chmod:*)"
+  - "Bash(chown:*)"
+  - "Bash(mv:*)"
+  - "Bash(dd:*)"
+  - "Bash(mkfs:*)"
+  - "Bash(kill:*)"

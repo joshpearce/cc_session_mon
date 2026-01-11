@@ -15,7 +15,7 @@ func (m Model) View() string {
 	}
 
 	if m.err != nil {
-		return errorStyle.Render(fmt.Sprintf("Error: %v", m.err))
+		return ErrorStyle().Render(fmt.Sprintf("Error: %v", m.err))
 	}
 
 	var b strings.Builder
@@ -47,7 +47,7 @@ func (m Model) View() string {
 
 // renderHeader renders the top header bar
 func (m Model) renderHeader() string {
-	title := titleStyle.Render("Claude Code Session Monitor")
+	title := TitleStyle().Render("Claude Code Session Monitor")
 
 	// Session status
 	activeCount := 0
@@ -59,9 +59,9 @@ func (m Model) renderHeader() string {
 
 	var status string
 	if len(m.sessions) == 0 {
-		status = statusStyle.Render("No sessions found")
+		status = StatusStyle().Render("No sessions found")
 	} else {
-		status = statusStyle.Render(fmt.Sprintf(
+		status = StatusStyle().Render(fmt.Sprintf(
 			"%d sessions (%d active)",
 			len(m.sessions),
 			activeCount,
@@ -73,9 +73,9 @@ func (m Model) renderHeader() string {
 	if sess := m.ActiveSession(); sess != nil {
 		name := filepath.Base(sess.ProjectPath)
 		if sess.IsActive {
-			activeSession = activeIndicatorStyle.Render(" [" + name + "]")
+			activeSession = ActiveIndicatorStyle().Render(" [" + name + "]")
 		} else {
-			activeSession = inactiveIndicatorStyle.Render(" [" + name + "]")
+			activeSession = InactiveIndicatorStyle().Render(" [" + name + "]")
 		}
 	}
 
@@ -112,16 +112,16 @@ func (m Model) renderViewTabs() string {
 	for i, t := range tabs {
 		label := fmt.Sprintf("%s %s", t.key, t.name)
 		if t.mode == m.viewMode {
-			rendered[i] = activeTabStyle.Render(label)
+			rendered[i] = ActiveTabStyle().Render(label)
 		} else {
-			rendered[i] = inactiveTabStyle.Render(label)
+			rendered[i] = InactiveTabStyle().Render(label)
 		}
 	}
 
 	row := lipgloss.JoinHorizontal(lipgloss.Top, rendered...)
 	gap := strings.Repeat("─", max(0, m.width-lipgloss.Width(row)-2))
 
-	return row + tabGapStyle.Render(gap)
+	return row + TabGapStyle().Render(gap)
 }
 
 // renderHelp renders the help footer
@@ -155,7 +155,7 @@ func (m Model) renderHelp() string {
 		}
 	}
 
-	return helpStyle.Render(strings.Join(help, " | "))
+	return HelpStyle().Render(strings.Join(help, " | "))
 }
 
 // max returns the larger of two ints
