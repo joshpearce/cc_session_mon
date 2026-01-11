@@ -39,8 +39,9 @@ type Model struct {
 	commandDelegate *commandDelegate
 	patternDelegate *patternDelegate
 
-	// Aggregated patterns across all sessions
-	patterns []*session.CommandPattern
+	// Aggregated patterns for active session
+	patterns            []*session.CommandPattern
+	patternListSession  string // Session ID for which patterns are displayed
 
 	// UI dimensions
 	width  int
@@ -72,21 +73,21 @@ func NewModel() Model {
 
 	// Initialize list components with delegates
 	m.sessionList = list.New([]list.Item{}, sessionDel, 0, 0)
-	m.sessionList.Title = "Sessions"
+	m.sessionList.SetShowTitle(false)
 	m.sessionList.SetShowHelp(false)
 	m.sessionList.SetShowStatusBar(false)
 	m.sessionList.SetFilteringEnabled(false)
 	m.sessionList.DisableQuitKeybindings()
 
 	m.commandList = list.New([]list.Item{}, commandDel, 0, 0)
-	m.commandList.Title = "Commands"
+	m.commandList.SetShowTitle(false)
 	m.commandList.SetShowHelp(false)
 	m.commandList.SetShowStatusBar(false)
 	m.commandList.SetFilteringEnabled(false)
 	m.commandList.DisableQuitKeybindings()
 
 	m.patternList = list.New([]list.Item{}, patternDel, 0, 0)
-	m.patternList.Title = "Unique Patterns"
+	m.patternList.SetShowTitle(false)
 	m.patternList.SetShowHelp(false)
 	m.patternList.SetShowStatusBar(false)
 	m.patternList.SetFilteringEnabled(false)
@@ -192,38 +193,52 @@ func (m Model) updateCommandList() Model {
 	return m
 }
 
-// aggregatePatterns builds the unique patterns from all sessions
+// aggregatePatterns builds the unique patterns for the active session
 func (m Model) aggregatePatterns() Model {
 	patternMap := make(map[string]*session.CommandPattern)
 
-	for _, sess := range m.sessions {
-		for _, cmd := range sess.Commands {
-			if p, exists := patternMap[cmd.Pattern]; exists {
-				p.Count++
-				if cmd.Timestamp.After(p.LastSeen) {
-					p.LastSeen = cmd.Timestamp
-				}
-				if len(p.Examples) < 5 {
-					// Avoid duplicate examples
-					isDupe := false
-					for _, ex := range p.Examples {
-						if ex == cmd.RawCommand {
-							isDupe = true
-							break
-						}
+	sess := m.ActiveSession()
+	if sess == nil {
+		m.patterns = nil
+		m.patternList.SetItems([]list.Item{})
+		m.patternListSession = ""
+		return m
+	}
+
+	// Check if we switched to a different session
+	sessionChanged := m.patternListSession != sess.ID
+	m.patternListSession = sess.ID
+
+	// Remember scroll position for preserving during updates (only if same session)
+	wasAtTop := m.patternList.Index() == 0
+	previousCount := len(m.patternList.Items())
+
+	for _, cmd := range sess.Commands {
+		if p, exists := patternMap[cmd.Pattern]; exists {
+			p.Count++
+			if cmd.Timestamp.After(p.LastSeen) {
+				p.LastSeen = cmd.Timestamp
+			}
+			if len(p.Examples) < 5 {
+				// Avoid duplicate examples
+				isDupe := false
+				for _, ex := range p.Examples {
+					if ex == cmd.RawCommand {
+						isDupe = true
+						break
 					}
-					if !isDupe {
-						p.Examples = append(p.Examples, cmd.RawCommand)
-					}
 				}
-			} else {
-				patternMap[cmd.Pattern] = &session.CommandPattern{
-					Pattern:  cmd.Pattern,
-					ToolName: cmd.ToolName,
-					Count:    1,
-					LastSeen: cmd.Timestamp,
-					Examples: []string{cmd.RawCommand},
+				if !isDupe {
+					p.Examples = append(p.Examples, cmd.RawCommand)
 				}
+			}
+		} else {
+			patternMap[cmd.Pattern] = &session.CommandPattern{
+				Pattern:  cmd.Pattern,
+				ToolName: cmd.ToolName,
+				Count:    1,
+				LastSeen: cmd.Timestamp,
+				Examples: []string{cmd.RawCommand},
 			}
 		}
 	}
@@ -243,14 +258,20 @@ func (m Model) aggregatePatterns() Model {
 		items[i] = patternItem{pattern: p}
 	}
 	m.patternList.SetItems(items)
+	m.patternList.Title = "Patterns - " + filepath.Base(sess.ProjectPath)
+
+	// Reset to top if session changed, initial load, or user was already at top
+	if sessionChanged || previousCount == 0 || wasAtTop {
+		m.patternList.Select(0)
+	}
 
 	return m
 }
 
 // updateListSizes updates list dimensions based on terminal size
 func (m Model) updateListSizes() Model {
-	// Reserve space for header (2), tabs (2), help (2), margins (2)
-	listHeight := m.height - 8
+	// Reserve space for header (2), tabs (2), column headers (1), help (2), margins (2)
+	listHeight := m.height - 9
 	if listHeight < 5 {
 		listHeight = 5
 	}

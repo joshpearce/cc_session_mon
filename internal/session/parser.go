@@ -31,31 +31,112 @@ type ContentItem struct {
 	Input json.RawMessage `json:"input,omitempty"`
 }
 
-// BashInput represents the input for a Bash tool call
-type BashInput struct {
+// GenericInput is used to extract common fields from any tool's input
+// It tries multiple common field names to find relevant display info
+type GenericInput struct {
+	// Common file/path fields
+	FilePath string `json:"file_path"`
+	Path     string `json:"path"`
+	URL      string `json:"url"`
+
+	// Command/query fields
 	Command     string `json:"command"`
-	Description string `json:"description,omitempty"`
-	Timeout     int    `json:"timeout,omitempty"`
+	Pattern     string `json:"pattern"`
+	Query       string `json:"query"`
+	Prompt      string `json:"prompt"`
+	Description string `json:"description"`
+
+	// Task-specific
+	Skill string `json:"skill"`
 }
 
-// FileInput represents the input for Edit/Write/NotebookEdit tool calls
-type FileInput struct {
-	FilePath  string `json:"file_path"`
-	Content   string `json:"content,omitempty"`
-	OldString string `json:"old_string,omitempty"`
-	NewString string `json:"new_string,omitempty"`
+// ExtractDisplayString returns the most relevant string to display for this input
+func (g *GenericInput) ExtractDisplayString(toolName string) string {
+	// Priority order for what to display based on tool type
+	switch toolName {
+	case "Bash":
+		return g.Command
+	case "Edit", "Write", "NotebookEdit", "Read":
+		return g.FilePath
+	case "Glob":
+		if g.Pattern != "" && g.Path != "" {
+			return g.Path + "/" + g.Pattern
+		}
+		if g.Pattern != "" {
+			return g.Pattern
+		}
+		return g.Path
+	case "Grep":
+		if g.Pattern != "" && g.Path != "" {
+			return g.Pattern + " in " + g.Path
+		}
+		if g.Pattern != "" {
+			return g.Pattern
+		}
+		return g.Path
+	case "WebFetch", "WebSearch":
+		if g.URL != "" {
+			return g.URL
+		}
+		return g.Query
+	case "Task":
+		return g.Description
+	case "Skill":
+		return g.Skill
+	}
+
+	// Generic fallback: try fields in priority order
+	if g.FilePath != "" {
+		return g.FilePath
+	}
+	if g.Path != "" {
+		return g.Path
+	}
+	if g.Command != "" {
+		return g.Command
+	}
+	if g.Pattern != "" {
+		return g.Pattern
+	}
+	if g.Query != "" {
+		return g.Query
+	}
+	if g.URL != "" {
+		return g.URL
+	}
+	if g.Description != "" {
+		return g.Description
+	}
+	if g.Prompt != "" {
+		// Truncate long prompts
+		if len(g.Prompt) > 100 {
+			return g.Prompt[:100] + "..."
+		}
+		return g.Prompt
+	}
+	if g.Skill != "" {
+		return g.Skill
+	}
+
+	return ""
+}
+
+// SessionMetadata contains metadata extracted from a session file
+type SessionMetadata struct {
+	GitBranch string
+	CWD       string
 }
 
 // ParseSessionFile reads a JSONL file and extracts command entries
-func ParseSessionFile(path string) ([]CommandEntry, string, error) {
+func ParseSessionFile(path string) ([]CommandEntry, SessionMetadata, error) {
 	file, err := os.Open(path)
 	if err != nil {
-		return nil, "", err
+		return nil, SessionMetadata{}, err
 	}
 	defer file.Close()
 
 	var commands []CommandEntry
-	var gitBranch string
+	var meta SessionMetadata
 	seen := make(map[string]bool) // Track seen UUIDs to avoid duplicates
 
 	scanner := bufio.NewScanner(file)
@@ -69,9 +150,12 @@ func ParseSessionFile(path string) ([]CommandEntry, string, error) {
 			continue // Skip malformed lines
 		}
 
-		// Capture git branch from any record that has it
-		if record.GitBranch != "" && gitBranch == "" {
-			gitBranch = record.GitBranch
+		// Capture metadata from the first record that has each field
+		if record.GitBranch != "" && meta.GitBranch == "" {
+			meta.GitBranch = record.GitBranch
+		}
+		if record.CWD != "" && meta.CWD == "" {
+			meta.CWD = record.CWD
 		}
 
 		// Only process assistant messages with tool calls
@@ -84,8 +168,32 @@ func ParseSessionFile(path string) ([]CommandEntry, string, error) {
 				continue
 			}
 
-			// Skip non-write operations
-			if !IsWriteOperation(content.Name) {
+			entry := CommandEntry{
+				ToolName:  content.Name,
+				SessionID: record.SessionID,
+				UUID:      record.UUID,
+			}
+
+			// Parse input and extract display string
+			var input GenericInput
+			if err := json.Unmarshal(content.Input, &input); err == nil {
+				entry.RawCommand = input.ExtractDisplayString(content.Name)
+			}
+
+			// Fall back to tool name if no display string extracted
+			if entry.RawCommand == "" {
+				entry.RawCommand = content.Name
+			}
+
+			// Extract pattern (Bash gets special treatment for command grouping)
+			if content.Name == "Bash" {
+				entry.Pattern = ExtractPattern("Bash", input.Command)
+			} else {
+				entry.Pattern = content.Name
+			}
+
+			// Skip if pattern should be excluded
+			if !ShouldInclude(entry.Pattern) {
 				continue
 			}
 
@@ -96,37 +204,11 @@ func ParseSessionFile(path string) ([]CommandEntry, string, error) {
 			}
 			seen[entryKey] = true
 
-			entry := CommandEntry{
-				ToolName:  content.Name,
-				SessionID: record.SessionID,
-				UUID:      record.UUID,
-			}
-
 			// Parse timestamp
 			if t, err := time.Parse(time.RFC3339, record.Timestamp); err == nil {
 				entry.Timestamp = t
 			} else {
 				entry.Timestamp = time.Now()
-			}
-
-			// Extract raw command/path and pattern based on tool type
-			switch content.Name {
-			case "Bash":
-				var input BashInput
-				if err := json.Unmarshal(content.Input, &input); err == nil {
-					entry.RawCommand = input.Command
-					entry.Pattern = ExtractPattern("Bash", input.Command)
-				}
-			case "Edit", "Write", "NotebookEdit":
-				var input FileInput
-				if err := json.Unmarshal(content.Input, &input); err == nil {
-					entry.RawCommand = input.FilePath
-					entry.Pattern = content.Name
-				}
-			default:
-				// For other tools, use the tool name as both pattern and command
-				entry.Pattern = content.Name
-				entry.RawCommand = content.Name
 			}
 
 			// Only add if we got a valid command/path
@@ -136,7 +218,7 @@ func ParseSessionFile(path string) ([]CommandEntry, string, error) {
 		}
 	}
 
-	return commands, gitBranch, scanner.Err()
+	return commands, meta, scanner.Err()
 }
 
 // ParseSessionFileFrom reads a JSONL file starting from a byte offset
@@ -176,7 +258,36 @@ func ParseSessionFileFrom(path string, offset int64) ([]CommandEntry, int64, err
 		}
 
 		for _, content := range record.Message.Content {
-			if content.Type != "tool_use" || !IsWriteOperation(content.Name) {
+			if content.Type != "tool_use" {
+				continue
+			}
+
+			entry := CommandEntry{
+				ToolName:  content.Name,
+				SessionID: record.SessionID,
+				UUID:      record.UUID,
+			}
+
+			// Parse input and extract display string
+			var input GenericInput
+			if err := json.Unmarshal(content.Input, &input); err == nil {
+				entry.RawCommand = input.ExtractDisplayString(content.Name)
+			}
+
+			// Fall back to tool name if no display string extracted
+			if entry.RawCommand == "" {
+				entry.RawCommand = content.Name
+			}
+
+			// Extract pattern (Bash gets special treatment for command grouping)
+			if content.Name == "Bash" {
+				entry.Pattern = ExtractPattern("Bash", input.Command)
+			} else {
+				entry.Pattern = content.Name
+			}
+
+			// Skip if pattern should be excluded
+			if !ShouldInclude(entry.Pattern) {
 				continue
 			}
 
@@ -186,33 +297,8 @@ func ParseSessionFileFrom(path string, offset int64) ([]CommandEntry, int64, err
 			}
 			seen[entryKey] = true
 
-			entry := CommandEntry{
-				ToolName:  content.Name,
-				SessionID: record.SessionID,
-				UUID:      record.UUID,
-			}
-
 			if t, err := time.Parse(time.RFC3339, record.Timestamp); err == nil {
 				entry.Timestamp = t
-			}
-
-			switch content.Name {
-			case "Bash":
-				var input BashInput
-				if err := json.Unmarshal(content.Input, &input); err == nil {
-					entry.RawCommand = input.Command
-					entry.Pattern = ExtractPattern("Bash", input.Command)
-				}
-			case "Edit", "Write", "NotebookEdit":
-				var input FileInput
-				if err := json.Unmarshal(content.Input, &input); err == nil {
-					entry.RawCommand = input.FilePath
-					entry.Pattern = content.Name
-				}
-			default:
-				// For other tools, use the tool name as both pattern and command
-				entry.Pattern = content.Name
-				entry.RawCommand = content.Name
 			}
 
 			if entry.RawCommand != "" {

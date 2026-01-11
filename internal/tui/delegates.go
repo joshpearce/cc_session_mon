@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"cc_session_mon/internal/config"
 	"cc_session_mon/internal/session"
 
 	"github.com/charmbracelet/bubbles/list"
@@ -125,6 +126,13 @@ type commandDelegate struct {
 	width int
 }
 
+// Column widths for command list (exported for header rendering)
+const (
+	CommandTimestampWidth = 12
+	CommandGroupWidth     = 12
+	CommandPatternWidth   = 20
+)
+
 func newCommandDelegate() *commandDelegate {
 	return &commandDelegate{width: 80}
 }
@@ -142,24 +150,34 @@ func (d *commandDelegate) Render(w io.Writer, m list.Model, index int, item list
 		return
 	}
 
-	// Format: "Jan 02 15:04  Pattern  command..."
+	// Format: "Jan 02 15:04  group  Pattern  command..."
 	timestamp := i.command.Timestamp.Format("Jan 02 15:04")
 	pattern := i.command.Pattern
 
-	// Fixed widths for timestamp and pattern
-	timestampWidth := 12
-	patternWidth := 20
+	// Get group name from config
+	group := config.Global().GetToolGroup(pattern)
+	groupName := ""
+	if group != nil {
+		groupName = group.Name
+	}
+
+	// Pad/truncate group to fixed width
+	if len(groupName) > CommandGroupWidth {
+		groupName = groupName[:CommandGroupWidth-1] + "…"
+	} else {
+		groupName = groupName + strings.Repeat(" ", CommandGroupWidth-len(groupName))
+	}
 
 	// Pad/truncate pattern to fixed width
-	if len(pattern) > patternWidth {
-		pattern = pattern[:patternWidth-1] + "…"
+	if len(pattern) > CommandPatternWidth {
+		pattern = pattern[:CommandPatternWidth-1] + "…"
 	} else {
-		pattern = pattern + strings.Repeat(" ", patternWidth-len(pattern))
+		pattern = pattern + strings.Repeat(" ", CommandPatternWidth-len(pattern))
 	}
 
 	// Calculate space for raw command
-	// Format: "timestamp  pattern  command"
-	fixedWidth := timestampWidth + 2 + patternWidth + 2
+	// Format: "timestamp  group  pattern  command"
+	fixedWidth := CommandTimestampWidth + 2 + CommandGroupWidth + 2 + CommandPatternWidth + 2
 	commandWidth := d.width - fixedWidth
 	if commandWidth < 10 {
 		commandWidth = 10
@@ -171,7 +189,7 @@ func (d *commandDelegate) Render(w io.Writer, m list.Model, index int, item list
 		rawCmd = rawCmd[:commandWidth-1] + "…"
 	}
 
-	row := fmt.Sprintf("%s  %s  %s", timestamp, pattern, rawCmd)
+	row := fmt.Sprintf("%s  %s  %s  %s", timestamp, groupName, pattern, rawCmd)
 
 	// Pad to full width
 	if len(row) < d.width {
@@ -180,7 +198,7 @@ func (d *commandDelegate) Render(w io.Writer, m list.Model, index int, item list
 
 	// Apply styling based on selection and tool type
 	var style lipgloss.Style
-	baseStyle := StyleForTool(i.command.ToolName, i.command.Pattern)
+	baseStyle := StyleForPattern(i.command.Pattern)
 
 	if index == m.Index() {
 		style = baseStyle.
@@ -214,6 +232,13 @@ type patternDelegate struct {
 	width int
 }
 
+// Column widths for pattern list (exported for header rendering)
+const (
+	PatternPatternWidth = 25
+	PatternGroupWidth   = 12
+	PatternCountWidth   = 8
+)
+
 func newPatternDelegate() *patternDelegate {
 	return &patternDelegate{width: 80}
 }
@@ -231,26 +256,36 @@ func (d *patternDelegate) Render(w io.Writer, m list.Model, index int, item list
 		return
 	}
 
-	// Format: "Pattern  [count]  example..."
+	// Format: "Pattern  Group  [count]  example..."
 	pattern := i.pattern.Pattern
 	countStr := fmt.Sprintf("[%d]", i.pattern.Count)
 
-	// Fixed widths
-	patternWidth := 25
-	countWidth := 8
-
-	// Pad/truncate pattern
-	if len(pattern) > patternWidth {
-		pattern = pattern[:patternWidth-1] + "…"
-	} else {
-		pattern = pattern + strings.Repeat(" ", patternWidth-len(pattern))
+	// Get group name from config
+	group := config.Global().GetToolGroup(pattern)
+	groupName := ""
+	if group != nil {
+		groupName = group.Name
 	}
 
-	// Pad count
-	countStr = strings.Repeat(" ", countWidth-len(countStr)) + countStr
+	// Pad/truncate pattern
+	if len(pattern) > PatternPatternWidth {
+		pattern = pattern[:PatternPatternWidth-1] + "…"
+	} else {
+		pattern = pattern + strings.Repeat(" ", PatternPatternWidth-len(pattern))
+	}
+
+	// Pad/truncate group to fixed width
+	if len(groupName) > PatternGroupWidth {
+		groupName = groupName[:PatternGroupWidth-1] + "…"
+	} else {
+		groupName = groupName + strings.Repeat(" ", PatternGroupWidth-len(groupName))
+	}
+
+	// Pad count (right-aligned)
+	countStr = strings.Repeat(" ", PatternCountWidth-len(countStr)) + countStr
 
 	// Calculate space for example
-	fixedWidth := patternWidth + 2 + countWidth + 2
+	fixedWidth := PatternPatternWidth + 2 + PatternGroupWidth + 2 + PatternCountWidth + 2
 	exampleWidth := d.width - fixedWidth
 	if exampleWidth < 10 {
 		exampleWidth = 10
@@ -258,13 +293,14 @@ func (d *patternDelegate) Render(w io.Writer, m list.Model, index int, item list
 
 	example := ""
 	if len(i.pattern.Examples) > 0 {
-		example = i.pattern.Examples[0]
+		// Replace newlines with visible marker to keep single-line display
+		example = strings.ReplaceAll(i.pattern.Examples[0], "\n", "↵")
 		if len(example) > exampleWidth {
 			example = example[:exampleWidth-1] + "…"
 		}
 	}
 
-	row := fmt.Sprintf("%s  %s  %s", pattern, countStr, example)
+	row := fmt.Sprintf("%s  %s  %s  %s", pattern, groupName, countStr, example)
 
 	// Pad to full width
 	if len(row) < d.width {
@@ -273,7 +309,7 @@ func (d *patternDelegate) Render(w io.Writer, m list.Model, index int, item list
 
 	// Apply styling
 	var style lipgloss.Style
-	baseStyle := StyleForTool(i.pattern.ToolName, i.pattern.Pattern)
+	baseStyle := StyleForPattern(i.pattern.Pattern)
 
 	if index == m.Index() {
 		style = baseStyle.

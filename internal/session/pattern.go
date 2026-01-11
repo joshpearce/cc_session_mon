@@ -5,15 +5,9 @@ import (
 	"strings"
 )
 
-// IsWriteOperation returns true for operations that are NOT read-only
-// Uses an exclude list: anything not in the read-only list is considered a write operation
-func IsWriteOperation(toolName string) bool {
-	return !config.Global().IsReadOnlyTool(toolName)
-}
-
-// IsDangerousPattern returns true for patterns that warrant extra attention
-func IsDangerousPattern(pattern string) bool {
-	return config.Global().IsDangerousPattern(pattern)
+// ShouldInclude returns true if the pattern should be included in the display
+func ShouldInclude(pattern string) bool {
+	return !config.Global().ShouldExclude(pattern)
 }
 
 // ExtractPattern converts a tool call into Claude permission pattern format

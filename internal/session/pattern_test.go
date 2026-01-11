@@ -54,56 +54,20 @@ func TestExtractPattern(t *testing.T) {
 	}
 }
 
-func TestIsWriteOperation(t *testing.T) {
+func TestShouldInclude(t *testing.T) {
 	// Set up a known config for testing
 	config.SetGlobal(&config.Config{
-		ReadOnlyTools: []string{
-			"Read",
-			"Glob",
-			"Grep",
-			"WebFetch",
-		},
-		DangerousPatterns: []string{},
-	})
-
-	tests := []struct {
-		toolName string
-		expected bool
-	}{
-		// Tools NOT in read-only list = write operations
-		{"Bash", true},
-		{"Edit", true},
-		{"Write", true},
-		{"NotebookEdit", true},
-		{"Task", true},       // Not in test config's read-only list
-		{"SomeNewTool", true}, // Unknown tools are treated as write ops
-
-		// Tools IN read-only list = not write operations
-		{"Read", false},
-		{"Grep", false},
-		{"Glob", false},
-		{"WebFetch", false},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.toolName, func(t *testing.T) {
-			result := IsWriteOperation(tt.toolName)
-			if result != tt.expected {
-				t.Errorf("IsWriteOperation(%q) = %v, want %v",
-					tt.toolName, result, tt.expected)
-			}
-		})
-	}
-}
-
-func TestIsDangerousPattern(t *testing.T) {
-	// Set up a known config for testing
-	config.SetGlobal(&config.Config{
-		ReadOnlyTools: []string{},
-		DangerousPatterns: []string{
-			"Bash(rm:*)",
-			"Bash(sudo:*)",
-			"Bash(chmod:*)",
+		ToolGroups: []config.ToolGroup{
+			{
+				Name:     "excluded",
+				Exclude:  true,
+				Patterns: []string{"Read", "Glob", "Grep", "WebFetch"},
+			},
+			{
+				Name:     "bash",
+				Color:    "yellow",
+				Patterns: []string{"Bash(*)"},
+			},
 		},
 	})
 
@@ -111,20 +75,25 @@ func TestIsDangerousPattern(t *testing.T) {
 		pattern  string
 		expected bool
 	}{
-		{"Bash(rm:*)", true},
-		{"Bash(sudo:*)", true},
-		{"Bash(chmod:*)", true},
-		{"Bash(git:*)", false},
-		{"Bash(ls:*)", false},
-		{"Edit", false},
-		{"Write", false},
+		// Excluded patterns
+		{"Read", false},
+		{"Grep", false},
+		{"Glob", false},
+		{"WebFetch", false},
+
+		// Included patterns
+		{"Bash(ls:la)", true},
+		{"Edit", true},
+		{"Write", true},
+		{"NotebookEdit", true},
+		{"SomeNewTool", true}, // Unknown tools are included
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.pattern, func(t *testing.T) {
-			result := IsDangerousPattern(tt.pattern)
+			result := ShouldInclude(tt.pattern)
 			if result != tt.expected {
-				t.Errorf("IsDangerousPattern(%q) = %v, want %v",
+				t.Errorf("ShouldInclude(%q) = %v, want %v",
 					tt.pattern, result, tt.expected)
 			}
 		})

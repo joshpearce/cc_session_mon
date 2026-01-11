@@ -4,27 +4,77 @@
 # All themes are from the Catppuccin color palette
 theme: frappe
 
-# Tools listed here are considered read-only and will be excluded from monitoring.
-# Any tool NOT in this list will be shown as a state-changing operation.
-read_only_tools:
-  - Read
-  - Glob
-  - Grep
-  - WebFetch
-  - WebSearch
-  - Task
-  - TaskOutput
-  - TodoRead
-  - AskUserQuestion
-  - mcp__ide__getDiagnostics
+# Tool groups define how commands are styled and filtered.
+# Groups are checked in order - first match wins.
+#
+# Each group has:
+#   - name: display name for the group
+#   - patterns: list of patterns to match (supports * wildcards)
+#   - exclude: if true, matching commands are hidden from display entirely
+#   - color: catppuccin color name for styling (ignored if exclude is true)
+#   - bold: make text bold (optional)
+#
+# Available catppuccin colors:
+#   rosewater, flamingo, pink, mauve, red, maroon, peach, yellow,
+#   green, teal, sky, sapphire, blue, lavender, text, subtext1, subtext0,
+#   overlay2, overlay1, overlay0, surface2, surface1, surface0, base, mantle, crust
+tool_groups:
+  # Dangerous commands - destructive operations
+  - name: dangerous
+    color: red
+    bold: true
+    patterns:
+      - "Bash(rm:*)"
+      - "Bash(sudo:*)"
+      - "Bash(chmod:*)"
+      - "Bash(chown:*)"
+      - "Bash(dd:*)"
+      - "Bash(mkfs:*)"
+      - "Bash(kill:*)"
+      - "Bash(pkill:*)"
+      - "Bash(killall:*)"
 
-# Patterns that warrant extra visual attention (highlighted in the UI)
-dangerous_patterns:
-  - "Bash(rm:*)"
-  - "Bash(sudo:*)"
-  - "Bash(chmod:*)"
-  - "Bash(chown:*)"
-  - "Bash(mv:*)"
-  - "Bash(dd:*)"
-  - "Bash(mkfs:*)"
-  - "Bash(kill:*)"
+  # File modifications - creates or overwrites files
+  - name: write
+    color: peach
+    patterns:
+      - Write
+      - NotebookEdit
+
+  # File edits - modifies existing files
+  - name: edit
+    color: yellow
+    patterns:
+      - Edit
+
+  # Shell commands - can have side effects
+  - name: bash
+    color: mauve
+    patterns:
+      - "Bash(*)"
+
+  # Task/agent spawning
+  - name: task
+    color: lavender
+    patterns:
+      - Task
+      - TaskOutput
+
+  # Read-only operations - safe, no side effects
+  - name: read-only
+    color: green
+    patterns:
+      - Read
+      - Glob
+      - Grep
+      - WebFetch
+      - WebSearch
+      - TodoRead
+      - AskUserQuestion
+      - "mcp__*"
+
+  # Catch-all for anything not matched above
+  - name: unmatched
+    color: overlay1
+    patterns:
+      - "*"

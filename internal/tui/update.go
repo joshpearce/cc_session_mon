@@ -78,6 +78,7 @@ func (m Model) handleKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if len(m.sessions) > 0 {
 			m.activeIdx = (m.activeIdx + 1) % len(m.sessions)
 			m = m.updateCommandList()
+			m = m.aggregatePatterns()
 		}
 
 	case "shift+tab":
@@ -85,29 +86,36 @@ func (m Model) handleKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if len(m.sessions) > 0 {
 			m.activeIdx = (m.activeIdx - 1 + len(m.sessions)) % len(m.sessions)
 			m = m.updateCommandList()
+			m = m.aggregatePatterns()
 		}
 
 	case "l", "right":
-		// Next view mode
+		// Next view mode - return early to avoid passing key to list
 		switch m.viewMode {
 		case ViewSessions:
 			m.viewMode = ViewCommands
 		case ViewCommands:
 			m.viewMode = ViewPatterns
+			// Ensure patterns are for the current session
+			m = m.aggregatePatterns()
 		case ViewPatterns:
 			m.viewMode = ViewSessions
 		}
+		return m, nil
 
 	case "h", "left":
-		// Previous view mode
+		// Previous view mode - return early to avoid passing key to list
 		switch m.viewMode {
 		case ViewSessions:
 			m.viewMode = ViewPatterns
+			// Ensure patterns are for the current session
+			m = m.aggregatePatterns()
 		case ViewPatterns:
 			m.viewMode = ViewCommands
 		case ViewCommands:
 			m.viewMode = ViewSessions
 		}
+		return m, nil
 
 	case "enter":
 		// Drill down from sessions to commands
@@ -116,6 +124,7 @@ func (m Model) handleKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if i := m.sessionList.Index(); i >= 0 && i < len(m.sessions) {
 				m.activeIdx = i
 				m = m.updateCommandList()
+				m = m.aggregatePatterns()
 			}
 			m.viewMode = ViewCommands
 		}

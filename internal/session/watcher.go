@@ -129,16 +129,19 @@ func (w *Watcher) parseSessionFile(path, encodedProject string) *Session {
 		return nil
 	}
 
-	// Decode project path from directory name
-	projectPath := decodeProjectPath(encodedProject)
-
 	// Extract session ID from filename
 	sessionID := strings.TrimSuffix(filepath.Base(path), ".jsonl")
 
 	// Parse the main session file
-	commands, gitBranch, err := ParseSessionFile(path)
+	commands, meta, err := ParseSessionFile(path)
 	if err != nil {
 		return nil
+	}
+
+	// Use CWD from session file if available, otherwise fall back to decoded directory name
+	projectPath := meta.CWD
+	if projectPath == "" {
+		projectPath = decodeProjectPath(encodedProject)
 	}
 
 	// Also parse subagent files if they exist
@@ -178,7 +181,7 @@ func (w *Watcher) parseSessionFile(path, encodedProject string) *Session {
 		ID:           sessionID,
 		ProjectPath:  projectPath,
 		FilePath:     path,
-		GitBranch:    gitBranch,
+		GitBranch:    meta.GitBranch,
 		LastActivity: lastActivity,
 		Commands:     commands,
 		IsActive:     isActive,
@@ -186,22 +189,29 @@ func (w *Watcher) parseSessionFile(path, encodedProject string) *Session {
 }
 
 // decodeProjectPath converts directory name to path
-// Encoding: single dash = path separator, double dash = literal dash
-// e.g., "-Users-josh-code-cc--session--mon" -> "/Users/josh/code/cc-session-mon"
+// Encoding: single dash = path separator, double dash = dot (for hidden files/dirs)
+// Note: underscores and dashes in original path both become single dash, so decoding is lossy
+// We verify the path exists, otherwise return the encoded name
 func decodeProjectPath(encoded string) string {
 	if encoded == "" {
 		return ""
 	}
 
-	// Use a placeholder for double-dash (literal dash) to avoid confusion
+	// Use a placeholder for double-dash (dot in original path)
 	const placeholder = "\x00"
 	result := strings.ReplaceAll(encoded, "--", placeholder)
 
 	// Replace single dashes with path separators
 	result = strings.ReplaceAll(result, "-", "/")
 
-	// Restore literal dashes from placeholder
-	result = strings.ReplaceAll(result, placeholder, "-")
+	// Restore dots from placeholder
+	result = strings.ReplaceAll(result, placeholder, ".")
+
+	// Verify path exists, otherwise return encoded name
+	if _, err := os.Stat(result); err != nil {
+		// Path doesn't exist with this decoding, return encoded name
+		return encoded
+	}
 
 	return result
 }

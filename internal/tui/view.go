@@ -31,10 +31,16 @@ func (m Model) View() string {
 	// Main content area based on view mode
 	switch m.viewMode {
 	case ViewSessions:
+		b.WriteString(m.renderSessionHeaders())
+		b.WriteString("\n")
 		b.WriteString(m.sessionList.View())
 	case ViewCommands:
+		b.WriteString(m.renderCommandHeaders())
+		b.WriteString("\n")
 		b.WriteString(m.commandList.View())
 	case ViewPatterns:
+		b.WriteString(m.renderPatternHeaders())
+		b.WriteString("\n")
 		b.WriteString(m.patternList.View())
 	}
 
@@ -156,6 +162,53 @@ func (m Model) renderHelp() string {
 	}
 
 	return HelpStyle().Render(strings.Join(help, " | "))
+}
+
+// renderSessionHeaders renders column headers for the session list
+func (m Model) renderSessionHeaders() string {
+	// Session list doesn't have fixed columns, just a simple indicator
+	header := "  Session Path"
+	return ColumnHeaderStyle(m.width - 4).Render(header)
+}
+
+// renderCommandHeaders renders column headers for the command list
+func (m Model) renderCommandHeaders() string {
+	// Build header with same widths as delegate
+	date := padRight("Date", CommandTimestampWidth)
+	group := padRight("Group", CommandGroupWidth)
+	pattern := padRight("Pattern", CommandPatternWidth)
+	command := "Command"
+
+	header := fmt.Sprintf("%s  %s  %s  %s", date, group, pattern, command)
+	return ColumnHeaderStyle(m.width - 4).Render(header)
+}
+
+// renderPatternHeaders renders column headers for the pattern list
+func (m Model) renderPatternHeaders() string {
+	// Build header with same widths as delegate
+	pattern := padRight("Pattern", PatternPatternWidth)
+	group := padRight("Group", PatternGroupWidth)
+	count := padLeft("Count", PatternCountWidth)
+	example := "Example"
+
+	header := fmt.Sprintf("%s  %s  %s  %s", pattern, group, count, example)
+	return ColumnHeaderStyle(m.width - 4).Render(header)
+}
+
+// padRight pads a string with spaces on the right to reach target width
+func padRight(s string, width int) string {
+	if len(s) >= width {
+		return s[:width]
+	}
+	return s + strings.Repeat(" ", width-len(s))
+}
+
+// padLeft pads a string with spaces on the left to reach target width
+func padLeft(s string, width int) string {
+	if len(s) >= width {
+		return s[:width]
+	}
+	return strings.Repeat(" ", width-len(s)) + s
 }
 
 // max returns the larger of two ints
