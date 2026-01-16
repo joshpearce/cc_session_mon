@@ -24,6 +24,7 @@ type Watcher struct {
 	projectsDir string
 	sessions    map[string]*Session // keyed by main session file path
 	offsets     map[string]int64    // file read offsets for incremental parsing
+	lineNumbers map[string]int      // line numbers for incremental parsing (1-indexed, next line to read)
 	subagentMap map[string]string   // maps subagent file path -> main session file path
 	mu          sync.RWMutex
 
@@ -44,6 +45,7 @@ func NewWatcher(projectsDir string) (*Watcher, error) {
 		projectsDir: projectsDir,
 		sessions:    make(map[string]*Session),
 		offsets:     make(map[string]int64),
+		lineNumbers: make(map[string]int),
 		subagentMap: make(map[string]string),
 		Events:      make(chan WatchEvent, 100),
 		Errors:      make(chan error, 10),
@@ -262,17 +264,19 @@ func (w *Watcher) handleFileUpdate(path string) {
 		return
 	}
 
-	// Get current offset
+	// Get current offset and line number
 	offset := w.offsets[path]
+	startLine := w.lineNumbers[path]
 
 	// Parse new content from offset
-	newCommands, meta, newOffset, err := ParseSessionFileFrom(path, offset)
+	newCommands, meta, newOffset, newLine, err := ParseSessionFileFrom(path, offset, startLine)
 	if err != nil {
 		return
 	}
 
-	// Update offset
+	// Update offset and line number
 	w.offsets[path] = newOffset
+	w.lineNumbers[path] = newLine
 
 	// Update session metadata if we now have better info
 	// This handles the case where the session was created before CWD was available

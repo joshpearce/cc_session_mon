@@ -35,9 +35,14 @@ func (m Model) View() string {
 		b.WriteString("\n")
 		b.WriteString(m.sessionList.View())
 	case ViewCommands:
-		b.WriteString(m.renderCommandHeaders())
-		b.WriteString("\n")
-		b.WriteString(m.commandList.View())
+		if m.detailPanelOpen {
+			// Split view: list on left (60%), detail panel on right (40%)
+			b.WriteString(m.renderSplitCommandView())
+		} else {
+			b.WriteString(m.renderCommandHeaders())
+			b.WriteString("\n")
+			b.WriteString(m.commandList.View())
+		}
 	case ViewPatterns:
 		b.WriteString(m.renderPatternHeaders())
 		b.WriteString("\n")
@@ -145,12 +150,23 @@ func (m Model) renderHelp() string {
 			"q:quit",
 		}
 	case ViewCommands:
-		help = []string{
-			"j/k:navigate",
-			"tab:next session",
-			"h/l:switch view",
-			"esc:back",
-			"q:quit",
+		if m.detailPanelOpen {
+			help = []string{
+				"j/k:navigate",
+				"enter:close panel",
+				"esc:close panel",
+				"tab:next session",
+				"q:quit",
+			}
+		} else {
+			help = []string{
+				"j/k:navigate",
+				"enter:show details",
+				"tab:next session",
+				"h/l:switch view",
+				"esc:back",
+				"q:quit",
+			}
 		}
 	case ViewPatterns:
 		help = []string{
@@ -217,4 +233,53 @@ func max(a, b int) int {
 		return a
 	}
 	return b
+}
+
+// renderSplitCommandView renders the commands list with detail panel side-by-side
+func (m Model) renderSplitCommandView() string {
+	// Calculate widths: 60% for list, 40% for detail (minus separator)
+	totalWidth := m.width - 4
+	listWidth := int(float64(totalWidth) * 0.58)
+	detailWidth := totalWidth - listWidth - 1 // -1 for separator
+
+	// Calculate available height for content (same as list height calculation)
+	contentHeight := m.height - 9
+	if contentHeight < 5 {
+		contentHeight = 5
+	}
+
+	// Build the list side with headers
+	listHeader := m.renderCommandHeadersWithWidth(listWidth)
+
+	// Get list view - need to ensure it's rendered at the right width
+	// The list component should already be sized correctly from updateListSizes
+	listView := m.commandList.View()
+
+	// Build left side (header + list)
+	leftSide := lipgloss.NewStyle().
+		Width(listWidth).
+		Height(contentHeight + 1). // +1 for header
+		Render(listHeader + "\n" + listView)
+
+	// Build the separator - a vertical line
+	separator := lipgloss.NewStyle().
+		Foreground(GetTheme().Muted).
+		Render(strings.Repeat("│\n", contentHeight+1))
+
+	// Build the detail panel
+	rightSide := m.renderDetailPanel(detailWidth, contentHeight+1)
+
+	// Join horizontally
+	return lipgloss.JoinHorizontal(lipgloss.Top, leftSide, separator, rightSide)
+}
+
+// renderCommandHeadersWithWidth renders column headers at a specific width
+func (m Model) renderCommandHeadersWithWidth(width int) string {
+	date := padRight("Date", CommandTimestampWidth)
+	group := padRight("Group", CommandGroupWidth)
+	pattern := padRight("Pattern", CommandPatternWidth)
+	command := "Command"
+
+	header := fmt.Sprintf("%s  %s  %s  %s", date, group, pattern, command)
+	return ColumnHeaderStyle(width).Render(header)
 }

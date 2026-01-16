@@ -260,3 +260,77 @@ func StyleForPattern(pattern string) lipgloss.Style {
 	}
 	return style
 }
+
+// Detail panel styles
+
+// DetailHeaderStyle returns style for detail panel header
+func DetailHeaderStyle(width int) lipgloss.Style {
+	t := GetTheme()
+	return lipgloss.NewStyle().
+		Bold(true).
+		Foreground(t.Text).
+		Background(t.Surface1).
+		Width(width).
+		Padding(0, 1)
+}
+
+// LabelStyle returns style for field labels in detail panel
+func LabelStyle() lipgloss.Style {
+	t := GetTheme()
+	return lipgloss.NewStyle().
+		Bold(true).
+		Foreground(t.Primary)
+}
+
+// PathStyle returns style for file paths
+func PathStyle() lipgloss.Style {
+	t := GetTheme()
+	return lipgloss.NewStyle().
+		Foreground(t.Secondary)
+}
+
+// CodeBlockStyle returns style for code blocks
+func CodeBlockStyle(width int) lipgloss.Style {
+	t := GetTheme()
+	return lipgloss.NewStyle().
+		Background(t.Surface).
+		Foreground(t.Text).
+		Width(width).
+		Padding(0, 1)
+}
+
+// DangerHeaderStyle returns style for security warning headers
+func DangerHeaderStyle() lipgloss.Style {
+	t := GetTheme()
+	return lipgloss.NewStyle().
+		Bold(true).
+		Foreground(t.Danger)
+}
+
+// DangerStyle returns style for security warning text
+func DangerStyle() lipgloss.Style {
+	t := GetTheme()
+	return lipgloss.NewStyle().
+		Foreground(t.Danger)
+}
+
+// WarningStyle returns style for warning/caution text
+func WarningStyle() lipgloss.Style {
+	t := GetTheme()
+	return lipgloss.NewStyle().
+		Foreground(t.Warning)
+}
+
+// DeletionStyle returns style for deleted/old content in diffs
+func DeletionStyle() lipgloss.Style {
+	t := GetTheme()
+	return lipgloss.NewStyle().
+		Foreground(t.Danger)
+}
+
+// AdditionStyle returns style for added/new content in diffs
+func AdditionStyle() lipgloss.Style {
+	t := GetTheme()
+	return lipgloss.NewStyle().
+		Foreground(t.Secondary)
+}

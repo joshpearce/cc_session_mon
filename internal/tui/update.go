@@ -46,6 +46,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case errMsg:
 		m.err = msg
+
+	case detailLoadedMsg:
+		m.loadingDetail = false
+		m.loadedInput = msg
+
+	case detailErrorMsg:
+		m.loadingDetail = false
+		m.detailError = msg
 	}
 
 	// Update the active list component
@@ -118,18 +126,52 @@ func (m Model) handleKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case "enter":
-		// Drill down from sessions to commands
 		if m.viewMode == ViewSessions {
-			// Set active session to currently selected in list
+			// Drill down from sessions to commands
 			if i := m.sessionList.Index(); i >= 0 && i < len(m.sessions) {
 				m.activeIdx = i
 				m = m.updateCommandList()
 				m = m.aggregatePatterns()
 			}
 			m.viewMode = ViewCommands
+		} else if m.viewMode == ViewCommands {
+			// Toggle detail panel or update it with new command
+			if item, ok := m.commandList.SelectedItem().(commandItem); ok {
+				cmd := item.command
+
+				// If panel is open and same command selected, close panel
+				if m.detailPanelOpen && m.selectedCommand != nil &&
+					m.selectedCommand.UUID == cmd.UUID &&
+					m.selectedCommand.ToolName == cmd.ToolName {
+					m.detailPanelOpen = false
+					m.selectedCommand = nil
+					m.loadedInput = nil
+					m.detailError = nil
+					m = m.updateListSizes() // Restore list to full width
+					return m, nil
+				}
+
+				// Open panel and start loading
+				m.detailPanelOpen = true
+				m.selectedCommand = &cmd
+				m.loadedInput = nil
+				m.loadingDetail = true
+				m.detailError = nil
+				m = m.updateListSizes() // Reduce list width for panel
+				return m, m.loadDetailCmd(cmd)
+			}
 		}
 
 	case "esc":
+		// If detail panel is open, close it first
+		if m.viewMode == ViewCommands && m.detailPanelOpen {
+			m.detailPanelOpen = false
+			m.selectedCommand = nil
+			m.loadedInput = nil
+			m.detailError = nil
+			m = m.updateListSizes() // Restore list to full width
+			return m, nil
+		}
 		// Go back to sessions view (don't pass to list component)
 		if m.viewMode != ViewSessions {
 			m.viewMode = ViewSessions
@@ -162,6 +204,21 @@ func (m Model) handleKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.sessionList, cmd = m.sessionList.Update(msg)
 	case ViewCommands:
 		m.commandList, cmd = m.commandList.Update(msg)
+		// If detail panel is open and selection changed, reload details
+		if m.detailPanelOpen {
+			if item, ok := m.commandList.SelectedItem().(commandItem); ok {
+				newCmd := item.command
+				if m.selectedCommand == nil ||
+					m.selectedCommand.UUID != newCmd.UUID ||
+					m.selectedCommand.ToolName != newCmd.ToolName {
+					m.selectedCommand = &newCmd
+					m.loadedInput = nil
+					m.loadingDetail = true
+					m.detailError = nil
+					return m, m.loadDetailCmd(newCmd)
+				}
+			}
+		}
 	case ViewPatterns:
 		m.patternList, cmd = m.patternList.Update(msg)
 	}

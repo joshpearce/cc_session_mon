@@ -40,8 +40,15 @@ type Model struct {
 	patternDelegate *patternDelegate
 
 	// Aggregated patterns for active session
-	patterns            []*session.CommandPattern
-	patternListSession  string // Session ID for which patterns are displayed
+	patterns           []*session.CommandPattern
+	patternListSession string // Session ID for which patterns are displayed
+
+	// Detail panel state
+	detailPanelOpen bool                  // Whether the detail panel is visible
+	selectedCommand *session.CommandEntry // Currently selected command for details
+	loadedInput     *session.ToolInput    // Lazily loaded input data
+	loadingDetail   bool                  // Loading state indicator
+	detailError     error                 // Error from loading details
 
 	// UI dimensions
 	width  int
@@ -110,6 +117,8 @@ type (
 	sessionEventMsg       session.WatchEvent
 	tickMsg               time.Time
 	errMsg                error
+	detailLoadedMsg       *session.ToolInput // Tool input loaded successfully
+	detailErrorMsg        error              // Error loading tool input
 )
 
 // discoverSessionsCmd discovers existing sessions
@@ -146,6 +155,17 @@ func (m Model) tickCmd() tea.Cmd {
 	return tea.Tick(30*time.Second, func(t time.Time) tea.Msg {
 		return tickMsg(t)
 	})
+}
+
+// loadDetailCmd asynchronously loads tool input for a command
+func (m Model) loadDetailCmd(cmd session.CommandEntry) tea.Cmd {
+	return func() tea.Msg {
+		input, err := session.FetchToolInput(cmd.FilePath, cmd.LineNumber, cmd.ToolName, cmd.UUID)
+		if err != nil {
+			return detailErrorMsg(err)
+		}
+		return detailLoadedMsg(input)
+	}
 }
 
 // updateSessionList rebuilds the session list items
@@ -280,13 +300,19 @@ func (m Model) updateListSizes() Model {
 		listWidth = 20
 	}
 
+	// Command list width is reduced when detail panel is open
+	commandListWidth := listWidth
+	if m.viewMode == ViewCommands && m.detailPanelOpen {
+		commandListWidth = int(float64(listWidth) * 0.58)
+	}
+
 	// Update delegate widths
 	m.sessionDelegate.SetWidth(listWidth)
-	m.commandDelegate.SetWidth(listWidth)
+	m.commandDelegate.SetWidth(commandListWidth)
 	m.patternDelegate.SetWidth(listWidth)
 
 	m.sessionList.SetSize(listWidth, listHeight)
-	m.commandList.SetSize(listWidth, listHeight)
+	m.commandList.SetSize(commandListWidth, listHeight)
 	m.patternList.SetSize(listWidth, listHeight)
 
 	return m

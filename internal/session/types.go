@@ -21,6 +21,8 @@ type CommandEntry struct {
 	RawCommand string    // Full command for Bash, file_path for others
 	SessionID  string    // Session UUID
 	UUID       string    // Message UUID for deduplication
+	LineNumber int       // Line number in JSONL file (1-indexed) for lazy loading
+	FilePath   string    // Path to session JSONL file
 }
 
 // CommandPattern represents a unique command pattern for aggregation
