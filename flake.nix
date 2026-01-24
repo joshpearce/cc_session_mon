@@ -12,7 +12,7 @@
         pkgs = nixpkgs.legacyPackages.${system};
       in {
         packages = {
-          cc-session-mon = pkgs.buildGo124Module {
+          cc-session-mon = pkgs.buildGo125Module {
             pname = "cc-session-mon";
             version = "0.1.0";
             src = ./.;
@@ -23,7 +23,7 @@
         };
 
         devShells.default = pkgs.mkShell {
-          buildInputs = with pkgs; [ go_1_24 gopls golangci-lint ];
+          buildInputs = with pkgs; [ go_1_25 gopls golangci-lint ];
         };
       }
     ) // {
