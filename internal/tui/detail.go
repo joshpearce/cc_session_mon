@@ -124,60 +124,99 @@ func formatBashDetail(input *session.ToolInput, width int) string {
 	return b.String()
 }
 
+// securityCheck defines a check function and its warning message
+type securityCheck struct {
+	check   func(cmd string) bool
+	warning string
+}
+
+// securityChecks contains all bash security checks
+var securityChecks = []securityCheck{
+	{checkRecursiveRm, "Recursive file deletion"},
+	{checkSimpleRm, "File deletion"},
+	{checkSudo, "Runs with elevated privileges"},
+	{checkChmod, "Changes file permissions"},
+	{checkChown, "Changes file ownership"},
+	{checkCurlPipeShell, "Downloads and pipes to shell"},
+	{checkDd, "Direct disk/device operation"},
+	{checkMkfs, "Filesystem creation"},
+	{checkKill, "Process termination"},
+	{checkGitForcePush, "Force push to remote"},
+	{checkGitHardReset, "Hard reset (discards changes)"},
+}
+
 // analyzeBashSecurity returns security warnings for a bash command
 func analyzeBashSecurity(command string) []string {
 	var warnings []string
 	cmd := strings.ToLower(command)
 
-	// Destructive file operations
-	if strings.Contains(cmd, "rm ") || strings.HasPrefix(cmd, "rm\t") || strings.HasPrefix(cmd, "rm\n") {
-		if strings.Contains(cmd, "-rf") || strings.Contains(cmd, "-r ") || strings.Contains(cmd, " -fr") {
-			warnings = append(warnings, "Recursive file deletion")
-		} else {
-			warnings = append(warnings, "File deletion")
+	for _, sc := range securityChecks {
+		if sc.check(cmd) {
+			warnings = append(warnings, sc.warning)
 		}
 	}
-
-	// Privilege escalation
-	if strings.Contains(cmd, "sudo ") || strings.HasPrefix(cmd, "sudo\t") {
-		warnings = append(warnings, "Runs with elevated privileges")
-	}
-	if strings.Contains(cmd, "chmod ") {
-		warnings = append(warnings, "Changes file permissions")
-	}
-	if strings.Contains(cmd, "chown ") {
-		warnings = append(warnings, "Changes file ownership")
-	}
-
-	// Network/download execution
-	if (strings.Contains(cmd, "curl") || strings.Contains(cmd, "wget")) && strings.Contains(cmd, "|") {
-		if strings.Contains(cmd, "bash") || strings.Contains(cmd, "sh") {
-			warnings = append(warnings, "Downloads and pipes to shell")
-		}
-	}
-
-	// Disk operations
-	if strings.Contains(cmd, "dd ") || strings.HasPrefix(cmd, "dd\t") {
-		warnings = append(warnings, "Direct disk/device operation")
-	}
-	if strings.Contains(cmd, "mkfs") {
-		warnings = append(warnings, "Filesystem creation")
-	}
-
-	// Process termination
-	if strings.Contains(cmd, "kill ") || strings.Contains(cmd, "pkill ") || strings.Contains(cmd, "killall ") {
-		warnings = append(warnings, "Process termination")
-	}
-
-	// Git dangerous operations
-	if strings.Contains(cmd, "git push") && strings.Contains(cmd, "--force") {
-		warnings = append(warnings, "Force push to remote")
-	}
-	if strings.Contains(cmd, "git reset --hard") {
-		warnings = append(warnings, "Hard reset (discards changes)")
-	}
-
 	return warnings
+}
+
+// hasCommand checks if cmd contains "name " or starts with "name\t"
+func hasCommand(cmd, name string) bool {
+	return strings.Contains(cmd, name+" ") || strings.HasPrefix(cmd, name+"\t")
+}
+
+func checkRecursiveRm(cmd string) bool {
+	if !hasCommand(cmd, "rm") && !strings.HasPrefix(cmd, "rm\n") {
+		return false
+	}
+	return strings.Contains(cmd, "-rf") || strings.Contains(cmd, "-r ") || strings.Contains(cmd, " -fr")
+}
+
+func checkSimpleRm(cmd string) bool {
+	if !hasCommand(cmd, "rm") && !strings.HasPrefix(cmd, "rm\n") {
+		return false
+	}
+	// Only flag if not already caught by recursive check
+	return !checkRecursiveRm(cmd)
+}
+
+func checkSudo(cmd string) bool {
+	return strings.Contains(cmd, "sudo ") || strings.HasPrefix(cmd, "sudo\t")
+}
+
+func checkChmod(cmd string) bool {
+	return strings.Contains(cmd, "chmod ")
+}
+
+func checkChown(cmd string) bool {
+	return strings.Contains(cmd, "chown ")
+}
+
+func checkCurlPipeShell(cmd string) bool {
+	if !strings.Contains(cmd, "|") {
+		return false
+	}
+	hasCurl := strings.Contains(cmd, "curl") || strings.Contains(cmd, "wget")
+	hasShell := strings.Contains(cmd, "bash") || strings.Contains(cmd, "sh")
+	return hasCurl && hasShell
+}
+
+func checkDd(cmd string) bool {
+	return hasCommand(cmd, "dd")
+}
+
+func checkMkfs(cmd string) bool {
+	return strings.Contains(cmd, "mkfs")
+}
+
+func checkKill(cmd string) bool {
+	return strings.Contains(cmd, "kill ") || strings.Contains(cmd, "pkill ") || strings.Contains(cmd, "killall ")
+}
+
+func checkGitForcePush(cmd string) bool {
+	return strings.Contains(cmd, "git push") && strings.Contains(cmd, "--force")
+}
+
+func checkGitHardReset(cmd string) bool {
+	return strings.Contains(cmd, "git reset --hard")
 }
 
 // formatEditDetail renders Edit tool details
@@ -468,16 +507,19 @@ func formatGenericDetail(input *session.ToolInput, width int) string {
 	return b.String()
 }
 
+// sensitivePatterns contains path patterns that indicate security-sensitive files.
+// Defined at package level to avoid allocation on each isSensitivePath call.
+var sensitivePatterns = []string{
+	"/etc/", "/usr/", "/bin/", "/sbin/",
+	".ssh/", ".gnupg/", ".aws/",
+	".env", "credentials", "secrets",
+	"/root/", "sudoers", "passwd", "shadow",
+}
+
 // isSensitivePath checks if a path is security-sensitive
 func isSensitivePath(path string) bool {
-	sensitive := []string{
-		"/etc/", "/usr/", "/bin/", "/sbin/",
-		".ssh/", ".gnupg/", ".aws/",
-		".env", "credentials", "secrets",
-		"/root/", "sudoers", "passwd", "shadow",
-	}
 	pathLower := strings.ToLower(path)
-	for _, s := range sensitive {
+	for _, s := range sensitivePatterns {
 		if strings.Contains(pathLower, s) {
 			return true
 		}

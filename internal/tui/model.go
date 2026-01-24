@@ -116,20 +116,20 @@ type (
 	sessionsDiscoveredMsg []*session.Session
 	sessionEventMsg       session.WatchEvent
 	tickMsg               time.Time
-	errMsg                error
+	errMsg                struct{ error }    // General error
 	detailLoadedMsg       *session.ToolInput // Tool input loaded successfully
-	detailErrorMsg        error              // Error loading tool input
+	detailErrorMsg        struct{ error }    // Error loading tool input
 )
 
 // discoverSessionsCmd discovers existing sessions
 func (m Model) discoverSessionsCmd() tea.Cmd {
 	return func() tea.Msg {
 		if m.watcher == nil {
-			return errMsg(m.err)
+			return errMsg{m.err}
 		}
 		sessions, err := m.watcher.DiscoverSessions()
 		if err != nil {
-			return errMsg(err)
+			return errMsg{err}
 		}
 		return sessionsDiscoveredMsg(sessions)
 	}
@@ -145,7 +145,7 @@ func (m Model) watchSessionsCmd() tea.Cmd {
 		case event := <-m.watcher.Events:
 			return sessionEventMsg(event)
 		case err := <-m.watcher.Errors:
-			return errMsg(err)
+			return errMsg{err}
 		}
 	}
 }
@@ -162,7 +162,7 @@ func (m Model) loadDetailCmd(cmd session.CommandEntry) tea.Cmd {
 	return func() tea.Msg {
 		input, err := session.FetchToolInput(cmd.FilePath, cmd.LineNumber, cmd.ToolName, cmd.UUID)
 		if err != nil {
-			return detailErrorMsg(err)
+			return detailErrorMsg{err}
 		}
 		return detailLoadedMsg(input)
 	}
@@ -191,16 +191,19 @@ func (m Model) updateCommandList() Model {
 	wasAtTop := m.commandList.Index() == 0
 	previousCount := len(m.commandList.Items())
 
-	// Sort commands by timestamp descending (newest first)
-	commands := make([]session.CommandEntry, len(sess.Commands))
-	copy(commands, sess.Commands)
-	sort.Slice(commands, func(i, j int) bool {
-		return commands[i].Timestamp.After(commands[j].Timestamp)
+	// Create sorted indices instead of copying the full slice
+	indices := make([]int, len(sess.Commands))
+	for i := range indices {
+		indices[i] = i
+	}
+	sort.Slice(indices, func(i, j int) bool {
+		return sess.Commands[indices[i]].Timestamp.After(sess.Commands[indices[j]].Timestamp)
 	})
 
-	items := make([]list.Item, len(commands))
-	for i, c := range commands {
-		items[i] = commandItem{command: c}
+	// Build items using sorted indices, avoiding struct copy in range
+	items := make([]list.Item, len(indices))
+	for i, idx := range indices {
+		items[i] = commandItem{command: sess.Commands[idx]}
 	}
 	m.commandList.SetItems(items)
 	m.commandList.Title = "Commands - " + filepath.Base(sess.ProjectPath)
@@ -233,22 +236,22 @@ func (m Model) aggregatePatterns() Model {
 	wasAtTop := m.patternList.Index() == 0
 	previousCount := len(m.patternList.Items())
 
-	for _, cmd := range sess.Commands {
+	// Use a map per pattern to track unique examples (O(1) lookup instead of O(n))
+	exampleSets := make(map[string]map[string]struct{})
+
+	for i := range sess.Commands {
+		cmd := &sess.Commands[i] // Use pointer to avoid copying 128-byte struct
+
 		if p, exists := patternMap[cmd.Pattern]; exists {
 			p.Count++
 			if cmd.Timestamp.After(p.LastSeen) {
 				p.LastSeen = cmd.Timestamp
 			}
+			// Use set for O(1) duplicate check
 			if len(p.Examples) < 5 {
-				// Avoid duplicate examples
-				isDupe := false
-				for _, ex := range p.Examples {
-					if ex == cmd.RawCommand {
-						isDupe = true
-						break
-					}
-				}
-				if !isDupe {
+				exSet := exampleSets[cmd.Pattern]
+				if _, seen := exSet[cmd.RawCommand]; !seen {
+					exSet[cmd.RawCommand] = struct{}{}
 					p.Examples = append(p.Examples, cmd.RawCommand)
 				}
 			}
@@ -260,6 +263,8 @@ func (m Model) aggregatePatterns() Model {
 				LastSeen: cmd.Timestamp,
 				Examples: []string{cmd.RawCommand},
 			}
+			// Initialize example set for this pattern
+			exampleSets[cmd.Pattern] = map[string]struct{}{cmd.RawCommand: {}}
 		}
 	}
 

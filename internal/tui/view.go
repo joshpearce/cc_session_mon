@@ -227,14 +227,6 @@ func padLeft(s string, width int) string {
 	return strings.Repeat(" ", width-len(s)) + s
 }
 
-// max returns the larger of two ints
-func max(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
-}
-
 // renderSplitCommandView renders the commands list with detail panel side-by-side
 func (m Model) renderSplitCommandView() string {
 	// Calculate widths: 60% for list, 40% for detail (minus separator)

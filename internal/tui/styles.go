@@ -65,61 +65,42 @@ func loadTheme(name string) *Theme {
 
 // ColorByName returns a lipgloss.Color for a catppuccin color name
 func (t *Theme) ColorByName(name string) lipgloss.Color {
-	switch name {
-	case "rosewater":
-		return lipgloss.Color(t.flavor.Rosewater().Hex)
-	case "flamingo":
-		return lipgloss.Color(t.flavor.Flamingo().Hex)
-	case "pink":
-		return lipgloss.Color(t.flavor.Pink().Hex)
-	case "mauve":
-		return lipgloss.Color(t.flavor.Mauve().Hex)
-	case "red":
-		return lipgloss.Color(t.flavor.Red().Hex)
-	case "maroon":
-		return lipgloss.Color(t.flavor.Maroon().Hex)
-	case "peach":
-		return lipgloss.Color(t.flavor.Peach().Hex)
-	case "yellow":
-		return lipgloss.Color(t.flavor.Yellow().Hex)
-	case "green":
-		return lipgloss.Color(t.flavor.Green().Hex)
-	case "teal":
-		return lipgloss.Color(t.flavor.Teal().Hex)
-	case "sky":
-		return lipgloss.Color(t.flavor.Sky().Hex)
-	case "sapphire":
-		return lipgloss.Color(t.flavor.Sapphire().Hex)
-	case "blue":
-		return lipgloss.Color(t.flavor.Blue().Hex)
-	case "lavender":
-		return lipgloss.Color(t.flavor.Lavender().Hex)
-	case "text":
-		return lipgloss.Color(t.flavor.Text().Hex)
-	case "subtext1":
-		return lipgloss.Color(t.flavor.Subtext1().Hex)
-	case "subtext0":
-		return lipgloss.Color(t.flavor.Subtext0().Hex)
-	case "overlay2":
-		return lipgloss.Color(t.flavor.Overlay2().Hex)
-	case "overlay1":
-		return lipgloss.Color(t.flavor.Overlay1().Hex)
-	case "overlay0":
-		return lipgloss.Color(t.flavor.Overlay0().Hex)
-	case "surface2":
-		return lipgloss.Color(t.flavor.Surface2().Hex)
-	case "surface1":
-		return lipgloss.Color(t.flavor.Surface1().Hex)
-	case "surface0":
-		return lipgloss.Color(t.flavor.Surface0().Hex)
-	case "base":
-		return lipgloss.Color(t.flavor.Base().Hex)
-	case "mantle":
-		return lipgloss.Color(t.flavor.Mantle().Hex)
-	case "crust":
-		return lipgloss.Color(t.flavor.Crust().Hex)
-	default:
-		return lipgloss.Color(t.flavor.Text().Hex)
+	if getter, ok := t.colorGetters()[name]; ok {
+		return lipgloss.Color(getter().Hex)
+	}
+	return lipgloss.Color(t.flavor.Text().Hex)
+}
+
+// colorGetters returns a map of color name to getter function.
+// This replaces the switch statement for O(1) lookup.
+func (t *Theme) colorGetters() map[string]func() catppuccin.Color {
+	return map[string]func() catppuccin.Color{
+		"rosewater": t.flavor.Rosewater,
+		"flamingo":  t.flavor.Flamingo,
+		"pink":      t.flavor.Pink,
+		"mauve":     t.flavor.Mauve,
+		"red":       t.flavor.Red,
+		"maroon":    t.flavor.Maroon,
+		"peach":     t.flavor.Peach,
+		"yellow":    t.flavor.Yellow,
+		"green":     t.flavor.Green,
+		"teal":      t.flavor.Teal,
+		"sky":       t.flavor.Sky,
+		"sapphire":  t.flavor.Sapphire,
+		"blue":      t.flavor.Blue,
+		"lavender":  t.flavor.Lavender,
+		"text":      t.flavor.Text,
+		"subtext1":  t.flavor.Subtext1,
+		"subtext0":  t.flavor.Subtext0,
+		"overlay2":  t.flavor.Overlay2,
+		"overlay1":  t.flavor.Overlay1,
+		"overlay0":  t.flavor.Overlay0,
+		"surface2":  t.flavor.Surface2,
+		"surface1":  t.flavor.Surface1,
+		"surface0":  t.flavor.Surface0,
+		"base":      t.flavor.Base,
+		"mantle":    t.flavor.Mantle,
+		"crust":     t.flavor.Crust,
 	}
 }
 

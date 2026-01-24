@@ -1,7 +1,7 @@
 package tui
 
 import (
-	"sort"
+	"cc_session_mon/internal/session"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -45,7 +45,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmds = append(cmds, m.tickCmd())
 
 	case errMsg:
-		m.err = msg
+		m.err = msg.error
 
 	case detailLoadedMsg:
 		m.loadingDetail = false
@@ -53,7 +53,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case detailErrorMsg:
 		m.loadingDetail = false
-		m.detailError = msg
+		m.detailError = msg.error
 	}
 
 	// Update the active list component
@@ -77,128 +77,215 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m Model) handleKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	key := msg.String()
 
+	// Global keys (always handled)
 	switch key {
 	case "ctrl+c", "q":
 		return m, tea.Quit
-
-	case "tab":
-		// Next session
-		if len(m.sessions) > 0 {
-			m.activeIdx = (m.activeIdx + 1) % len(m.sessions)
-			m = m.updateCommandList()
-			m = m.aggregatePatterns()
-		}
-
-	case "shift+tab":
-		// Previous session
-		if len(m.sessions) > 0 {
-			m.activeIdx = (m.activeIdx - 1 + len(m.sessions)) % len(m.sessions)
-			m = m.updateCommandList()
-			m = m.aggregatePatterns()
-		}
-
-	case "l", "right":
-		// Next view mode - return early to avoid passing key to list
-		switch m.viewMode {
-		case ViewSessions:
-			m.viewMode = ViewCommands
-		case ViewCommands:
-			m.viewMode = ViewPatterns
-			// Ensure patterns are for the current session
-			m = m.aggregatePatterns()
-		case ViewPatterns:
-			m.viewMode = ViewSessions
-		}
-		return m, nil
-
-	case "h", "left":
-		// Previous view mode - return early to avoid passing key to list
-		switch m.viewMode {
-		case ViewSessions:
-			m.viewMode = ViewPatterns
-			// Ensure patterns are for the current session
-			m = m.aggregatePatterns()
-		case ViewPatterns:
-			m.viewMode = ViewCommands
-		case ViewCommands:
-			m.viewMode = ViewSessions
-		}
-		return m, nil
-
-	case "enter":
-		if m.viewMode == ViewSessions {
-			// Drill down from sessions to commands
-			if i := m.sessionList.Index(); i >= 0 && i < len(m.sessions) {
-				m.activeIdx = i
-				m = m.updateCommandList()
-				m = m.aggregatePatterns()
-			}
-			m.viewMode = ViewCommands
-		} else if m.viewMode == ViewCommands {
-			// Toggle detail panel or update it with new command
-			if item, ok := m.commandList.SelectedItem().(commandItem); ok {
-				cmd := item.command
-
-				// If panel is open and same command selected, close panel
-				if m.detailPanelOpen && m.selectedCommand != nil &&
-					m.selectedCommand.UUID == cmd.UUID &&
-					m.selectedCommand.ToolName == cmd.ToolName {
-					m.detailPanelOpen = false
-					m.selectedCommand = nil
-					m.loadedInput = nil
-					m.detailError = nil
-					m = m.updateListSizes() // Restore list to full width
-					return m, nil
-				}
-
-				// Open panel and start loading
-				m.detailPanelOpen = true
-				m.selectedCommand = &cmd
-				m.loadedInput = nil
-				m.loadingDetail = true
-				m.detailError = nil
-				m = m.updateListSizes() // Reduce list width for panel
-				return m, m.loadDetailCmd(cmd)
-			}
-		}
-
-	case "esc":
-		// If detail panel is open, close it first
-		if m.viewMode == ViewCommands && m.detailPanelOpen {
-			m.detailPanelOpen = false
-			m.selectedCommand = nil
-			m.loadedInput = nil
-			m.detailError = nil
-			m = m.updateListSizes() // Restore list to full width
-			return m, nil
-		}
-		// Go back to sessions view (don't pass to list component)
-		if m.viewMode != ViewSessions {
-			m.viewMode = ViewSessions
-			return m, nil
-		}
-		return m, nil
-
-	case "backspace":
-		// Go back to sessions view
-		if m.viewMode != ViewSessions {
-			m.viewMode = ViewSessions
-		}
-
 	case "r":
-		// Refresh sessions
 		return m, m.discoverSessionsCmd()
-
-	case "1":
-		m.viewMode = ViewSessions
-	case "2":
-		m.viewMode = ViewCommands
-	case "3":
-		m.viewMode = ViewPatterns
 	}
 
-	// Pass through to active list for j/k navigation
+	// Session navigation keys
+	if newModel, handled := m.handleSessionNavigation(key); handled {
+		return newModel, nil
+	}
+
+	// View switching keys
+	if newModel, handled := m.handleViewSwitch(key); handled {
+		return newModel, nil
+	}
+
+	// Action keys (enter, esc, backspace)
+	if newModel, cmd, handled := m.handleActionKeys(key); handled {
+		return newModel, cmd
+	}
+
+	// Number keys for direct view access
+	if newModel, handled := m.handleNumberKeys(key); handled {
+		return newModel, nil
+	}
+
+	// Pass through to active list and handle detail panel updates
+	return m.handleListNavigation(msg)
+}
+
+// handleSessionNavigation handles tab/shift+tab for session switching
+func (m Model) handleSessionNavigation(key string) (Model, bool) {
+	if len(m.sessions) == 0 {
+		return m, false
+	}
+
+	switch key {
+	case "tab":
+		m.activeIdx = (m.activeIdx + 1) % len(m.sessions)
+		m = m.updateCommandList()
+		m = m.aggregatePatterns()
+		return m, true
+	case "shift+tab":
+		m.activeIdx = (m.activeIdx - 1 + len(m.sessions)) % len(m.sessions)
+		m = m.updateCommandList()
+		m = m.aggregatePatterns()
+		return m, true
+	}
+	return m, false
+}
+
+// handleViewSwitch handles h/l and arrow keys for view cycling
+func (m Model) handleViewSwitch(key string) (Model, bool) {
+	switch key {
+	case "l", "right":
+		m = m.cycleViewForward()
+		return m, true
+	case "h", "left":
+		m = m.cycleViewBackward()
+		return m, true
+	}
+	return m, false
+}
+
+// cycleViewForward moves to the next view
+func (m Model) cycleViewForward() Model {
+	switch m.viewMode {
+	case ViewSessions:
+		m.viewMode = ViewCommands
+	case ViewCommands:
+		m.viewMode = ViewPatterns
+		m = m.aggregatePatterns()
+	case ViewPatterns:
+		m.viewMode = ViewSessions
+	}
+	return m
+}
+
+// cycleViewBackward moves to the previous view
+func (m Model) cycleViewBackward() Model {
+	switch m.viewMode {
+	case ViewSessions:
+		m.viewMode = ViewPatterns
+		m = m.aggregatePatterns()
+	case ViewPatterns:
+		m.viewMode = ViewCommands
+	case ViewCommands:
+		m.viewMode = ViewSessions
+	}
+	return m
+}
+
+// handleActionKeys handles enter, esc, backspace
+func (m Model) handleActionKeys(key string) (Model, tea.Cmd, bool) {
+	switch key {
+	case "enter":
+		return m.handleEnter()
+	case "esc":
+		return m.handleEsc()
+	case "backspace":
+		if m.viewMode != ViewSessions {
+			m.viewMode = ViewSessions
+		}
+		return m, nil, true
+	}
+	return m, nil, false
+}
+
+// handleEnter processes enter key based on current view
+func (m Model) handleEnter() (Model, tea.Cmd, bool) {
+	switch m.viewMode {
+	case ViewSessions:
+		if i := m.sessionList.Index(); i >= 0 && i < len(m.sessions) {
+			m.activeIdx = i
+			m = m.updateCommandList()
+			m = m.aggregatePatterns()
+		}
+		m.viewMode = ViewCommands
+		return m, nil, true
+
+	case ViewCommands:
+		return m.toggleDetailPanel()
+
+	case ViewPatterns:
+		// No action on enter in patterns view
+		return m, nil, false
+	}
+	return m, nil, false
+}
+
+// toggleDetailPanel opens/closes the detail panel for the selected command
+func (m Model) toggleDetailPanel() (Model, tea.Cmd, bool) {
+	item, ok := m.commandList.SelectedItem().(commandItem)
+	if !ok {
+		return m, nil, true
+	}
+
+	cmd := item.command
+
+	// If panel is open and same command selected, close panel
+	if m.detailPanelOpen && m.selectedCommand != nil &&
+		m.selectedCommand.UUID == cmd.UUID &&
+		m.selectedCommand.ToolName == cmd.ToolName {
+		m = m.closeDetailPanel()
+		return m, nil, true
+	}
+
+	// Open panel and start loading
+	m = m.openDetailPanel(&cmd)
+	return m, m.loadDetailCmd(cmd), true
+}
+
+// closeDetailPanel closes the detail panel and clears related state
+func (m Model) closeDetailPanel() Model {
+	m.detailPanelOpen = false
+	m.selectedCommand = nil
+	m.loadedInput = nil
+	m.detailError = nil
+	m = m.updateListSizes()
+	return m
+}
+
+// openDetailPanel opens the detail panel for a command
+func (m Model) openDetailPanel(cmd *session.CommandEntry) Model {
+	m.detailPanelOpen = true
+	m.selectedCommand = cmd
+	m.loadedInput = nil
+	m.loadingDetail = true
+	m.detailError = nil
+	m = m.updateListSizes()
+	return m
+}
+
+// handleEsc processes escape key
+func (m Model) handleEsc() (Model, tea.Cmd, bool) {
+	// If detail panel is open, close it first
+	if m.viewMode == ViewCommands && m.detailPanelOpen {
+		m = m.closeDetailPanel()
+		return m, nil, true
+	}
+	// Go back to sessions view
+	if m.viewMode != ViewSessions {
+		m.viewMode = ViewSessions
+	}
+	return m, nil, true
+}
+
+// handleNumberKeys handles 1/2/3 for direct view switching
+func (m Model) handleNumberKeys(key string) (Model, bool) {
+	switch key {
+	case "1":
+		m.viewMode = ViewSessions
+		return m, true
+	case "2":
+		m.viewMode = ViewCommands
+		return m, true
+	case "3":
+		m.viewMode = ViewPatterns
+		return m, true
+	}
+	return m, false
+}
+
+// handleListNavigation passes keys to the active list component
+func (m Model) handleListNavigation(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
+
 	switch m.viewMode {
 	case ViewSessions:
 		m.sessionList, cmd = m.sessionList.Update(msg)
@@ -228,42 +315,42 @@ func (m Model) handleKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 // handleSessionEvent processes watcher events
 func (m Model) handleSessionEvent(event sessionEventMsg) Model {
-	switch event.Type {
-	case "discovered", "new_session":
-		// Add new session if not already tracked
-		found := false
-		for _, s := range m.sessions {
-			if s.FilePath == event.Session.FilePath {
-				found = true
-				break
-			}
-		}
-		if !found {
-			m.sessions = append(m.sessions, event.Session)
-			// Re-sort by activity
-			sort.Slice(m.sessions, func(i, j int) bool {
-				return m.sessions[i].LastActivity.After(m.sessions[j].LastActivity)
-			})
-			m = m.updateSessionList()
-			m = m.aggregatePatterns()
-		}
-
-	case "new_commands":
-		// Update the session and refresh views
-		for i, s := range m.sessions {
-			if s.FilePath == event.Session.FilePath {
-				m.sessions[i] = event.Session
-				break
-			}
-		}
-		// Re-sort by activity
-		sort.Slice(m.sessions, func(i, j int) bool {
-			return m.sessions[i].LastActivity.After(m.sessions[j].LastActivity)
-		})
-		m = m.updateSessionList()
-		m = m.updateCommandList()
-		m = m.aggregatePatterns()
+	if m.watcher == nil {
+		return m
 	}
+
+	// Remember currently selected session by file path
+	var selectedFilePath string
+	if m.activeIdx >= 0 && m.activeIdx < len(m.sessions) {
+		selectedFilePath = m.sessions[m.activeIdx].FilePath
+	}
+
+	// Get fresh sorted list from watcher (already sorted, no re-sort needed)
+	m.sessions = m.watcher.GetSessions()
+
+	// Restore selection by finding the session with the same file path
+	if selectedFilePath != "" {
+		for i, s := range m.sessions {
+			if s.FilePath == selectedFilePath {
+				m.activeIdx = i
+				break
+			}
+		}
+	}
+
+	// Clamp activeIdx to valid range
+	if m.activeIdx >= len(m.sessions) {
+		m.activeIdx = len(m.sessions) - 1
+	}
+	if m.activeIdx < 0 && len(m.sessions) > 0 {
+		m.activeIdx = 0
+	}
+
+	m = m.updateSessionList()
+	if event.Type == "new_commands" {
+		m = m.updateCommandList()
+	}
+	m = m.aggregatePatterns()
 
 	return m
 }

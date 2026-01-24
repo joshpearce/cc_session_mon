@@ -89,17 +89,18 @@ func (d *sessionDelegate) Render(w io.Writer, m list.Model, index int, item list
 
 	// Apply styling
 	var style lipgloss.Style
-	if index == m.Index() {
+	switch {
+	case index == m.Index():
 		style = lipgloss.NewStyle().
 			Background(GetTheme().Surface).
 			Foreground(GetTheme().Text).
 			Bold(true).
 			Width(d.width)
-	} else if i.session.IsActive {
+	case i.session.IsActive:
 		style = lipgloss.NewStyle().
 			Foreground(GetTheme().Secondary).
 			Width(d.width)
-	} else {
+	default:
 		style = lipgloss.NewStyle().
 			Foreground(GetTheme().Muted).
 			Width(d.width)
@@ -165,14 +166,14 @@ func (d *commandDelegate) Render(w io.Writer, m list.Model, index int, item list
 	if len(groupName) > CommandGroupWidth {
 		groupName = groupName[:CommandGroupWidth-1] + "…"
 	} else {
-		groupName = groupName + strings.Repeat(" ", CommandGroupWidth-len(groupName))
+		groupName += strings.Repeat(" ", CommandGroupWidth-len(groupName))
 	}
 
 	// Pad/truncate pattern to fixed width
 	if len(pattern) > CommandPatternWidth {
 		pattern = pattern[:CommandPatternWidth-1] + "…"
 	} else {
-		pattern = pattern + strings.Repeat(" ", CommandPatternWidth-len(pattern))
+		pattern += strings.Repeat(" ", CommandPatternWidth-len(pattern))
 	}
 
 	// Calculate space for raw command
@@ -193,7 +194,7 @@ func (d *commandDelegate) Render(w io.Writer, m list.Model, index int, item list
 
 	// Pad to full width
 	if len(row) < d.width {
-		row = row + strings.Repeat(" ", d.width-len(row))
+		row += strings.Repeat(" ", d.width-len(row))
 	}
 
 	// Apply styling based on selection and tool type
@@ -271,14 +272,14 @@ func (d *patternDelegate) Render(w io.Writer, m list.Model, index int, item list
 	if len(pattern) > PatternPatternWidth {
 		pattern = pattern[:PatternPatternWidth-1] + "…"
 	} else {
-		pattern = pattern + strings.Repeat(" ", PatternPatternWidth-len(pattern))
+		pattern += strings.Repeat(" ", PatternPatternWidth-len(pattern))
 	}
 
 	// Pad/truncate group to fixed width
 	if len(groupName) > PatternGroupWidth {
 		groupName = groupName[:PatternGroupWidth-1] + "…"
 	} else {
-		groupName = groupName + strings.Repeat(" ", PatternGroupWidth-len(groupName))
+		groupName += strings.Repeat(" ", PatternGroupWidth-len(groupName))
 	}
 
 	// Pad count (right-aligned)
@@ -304,7 +305,7 @@ func (d *patternDelegate) Render(w io.Writer, m list.Model, index int, item list
 
 	// Pad to full width
 	if len(row) < d.width {
-		row = row + strings.Repeat(" ", d.width-len(row))
+		row += strings.Repeat(" ", d.width-len(row))
 	}
 
 	// Apply styling

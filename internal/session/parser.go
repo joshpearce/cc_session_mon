@@ -64,72 +64,180 @@ func (g *GenericInput) ExtractDisplayString(toolName string) string {
 	case "Edit", "Write", "NotebookEdit", "Read":
 		return g.FilePath
 	case "Glob":
-		if g.Pattern != "" && g.Path != "" {
-			return g.Path + "/" + g.Pattern
-		}
-		if g.Pattern != "" {
-			return g.Pattern
-		}
-		return g.Path
+		return g.formatGlob()
 	case "Grep":
-		if g.Pattern != "" && g.Path != "" {
-			return g.Pattern + " in " + g.Path
-		}
-		if g.Pattern != "" {
-			return g.Pattern
-		}
-		return g.Path
+		return g.formatGrep()
 	case "WebFetch", "WebSearch":
-		if g.URL != "" {
-			return g.URL
-		}
-		return g.Query
+		return firstNonEmpty(g.URL, g.Query)
 	case "Task":
 		return g.Description
 	case "Skill":
 		return g.Skill
 	}
 
-	// Generic fallback: try fields in priority order
-	if g.FilePath != "" {
-		return g.FilePath
+	return g.fallbackDisplay()
+}
+
+// formatGlob returns a display string for Glob tool
+func (g *GenericInput) formatGlob() string {
+	if g.Pattern != "" && g.Path != "" {
+		return g.Path + "/" + g.Pattern
 	}
-	if g.Path != "" {
-		return g.Path
+	return firstNonEmpty(g.Pattern, g.Path)
+}
+
+// formatGrep returns a display string for Grep tool
+func (g *GenericInput) formatGrep() string {
+	if g.Pattern != "" && g.Path != "" {
+		return g.Pattern + " in " + g.Path
 	}
-	if g.Command != "" {
-		return g.Command
-	}
-	if g.Pattern != "" {
-		return g.Pattern
-	}
-	if g.Query != "" {
-		return g.Query
-	}
-	if g.URL != "" {
-		return g.URL
-	}
-	if g.Description != "" {
-		return g.Description
+	return firstNonEmpty(g.Pattern, g.Path)
+}
+
+// fallbackDisplay tries fields in priority order for unknown tools
+func (g *GenericInput) fallbackDisplay() string {
+	if s := firstNonEmpty(g.FilePath, g.Path, g.Command, g.Pattern, g.Query, g.URL, g.Description); s != "" {
+		return s
 	}
 	if g.Prompt != "" {
-		// Truncate long prompts
-		if len(g.Prompt) > 100 {
-			return g.Prompt[:100] + "..."
-		}
-		return g.Prompt
+		return truncate(g.Prompt, 100)
 	}
-	if g.Skill != "" {
-		return g.Skill
-	}
+	return g.Skill
+}
 
+// firstNonEmpty returns the first non-empty string from the arguments
+func firstNonEmpty(strs ...string) string {
+	for _, s := range strs {
+		if s != "" {
+			return s
+		}
+	}
 	return ""
+}
+
+// truncate returns s truncated to maxLen with "..." suffix if needed
+func truncate(s string, maxLen int) string {
+	if len(s) > maxLen {
+		return s[:maxLen] + "..."
+	}
+	return s
 }
 
 // SessionMetadata contains metadata extracted from a session file
 type SessionMetadata struct {
 	GitBranch string
 	CWD       string
+}
+
+// parseState holds state for incremental JSONL parsing
+type parseState struct {
+	commands   []CommandEntry
+	meta       SessionMetadata
+	seen       map[string]bool
+	lineNumber int
+	offset     int64
+	filePath   string
+}
+
+// newParseState creates a new parse state
+func newParseState(filePath string, startLine int, startOffset int64) *parseState {
+	return &parseState{
+		seen:       make(map[string]bool),
+		lineNumber: startLine,
+		offset:     startOffset,
+		filePath:   filePath,
+	}
+}
+
+// processLine parses a single JSONL line and extracts commands.
+// Returns the number of bytes consumed (for offset tracking).
+func (ps *parseState) processLine(line []byte) int {
+	lineLen := len(line) + 1 // +1 for newline
+	ps.lineNumber++
+
+	var record JSONLRecord
+	if err := json.Unmarshal(line, &record); err != nil {
+		return lineLen
+	}
+
+	ps.captureMetadata(&record)
+
+	if record.Type != "assistant" || record.Message == nil {
+		return lineLen
+	}
+
+	for _, content := range record.Message.Content {
+		ps.processToolUse(&record, &content)
+	}
+
+	return lineLen
+}
+
+// captureMetadata extracts session metadata from a record
+func (ps *parseState) captureMetadata(record *JSONLRecord) {
+	if record.CWD != "" && ps.meta.CWD == "" {
+		ps.meta.CWD = record.CWD
+	}
+	if record.GitBranch != "" && ps.meta.GitBranch == "" {
+		ps.meta.GitBranch = record.GitBranch
+	}
+}
+
+// processToolUse processes a single tool_use content item
+func (ps *parseState) processToolUse(record *JSONLRecord, content *ContentItem) {
+	if content.Type != "tool_use" {
+		return
+	}
+
+	entry := CommandEntry{
+		ToolName:   content.Name,
+		SessionID:  record.SessionID,
+		UUID:       record.UUID,
+		LineNumber: ps.lineNumber,
+		FilePath:   ps.filePath,
+	}
+
+	// Parse input and extract display string
+	var input GenericInput
+	if err := json.Unmarshal(content.Input, &input); err == nil {
+		entry.RawCommand = input.ExtractDisplayString(content.Name)
+	}
+
+	// Fall back to tool name if no display string extracted
+	if entry.RawCommand == "" {
+		entry.RawCommand = content.Name
+	}
+
+	// Extract pattern (Bash gets special treatment for command grouping)
+	if content.Name == "Bash" {
+		entry.Pattern = ExtractPattern("Bash", input.Command)
+	} else {
+		entry.Pattern = content.Name
+	}
+
+	// Skip if pattern should be excluded
+	if !ShouldInclude(entry.Pattern) {
+		return
+	}
+
+	// Create unique key for deduplication
+	entryKey := record.UUID + content.Name
+	if ps.seen[entryKey] {
+		return
+	}
+	ps.seen[entryKey] = true
+
+	// Parse timestamp
+	if t, err := time.Parse(time.RFC3339, record.Timestamp); err == nil {
+		entry.Timestamp = t
+	} else {
+		entry.Timestamp = time.Now()
+	}
+
+	// Only add if we got a valid command/path
+	if entry.RawCommand != "" {
+		ps.commands = append(ps.commands, entry)
+	}
 }
 
 // ParseSessionFile reads a JSONL file and extracts command entries
@@ -140,100 +248,22 @@ func ParseSessionFile(path string) ([]CommandEntry, SessionMetadata, error) {
 	}
 	defer file.Close()
 
-	var commands []CommandEntry
-	var meta SessionMetadata
-	seen := make(map[string]bool) // Track seen UUIDs to avoid duplicates
-	lineNumber := 0
+	ps := newParseState(path, 0, 0)
 
 	scanner := bufio.NewScanner(file)
-	// Increase buffer for large lines (some tool results can be huge)
 	buf := make([]byte, 0, 64*1024)
 	scanner.Buffer(buf, 2*1024*1024) // 2MB max line size
 
 	for scanner.Scan() {
-		lineNumber++
-
-		var record JSONLRecord
-		if err := json.Unmarshal(scanner.Bytes(), &record); err != nil {
-			continue // Skip malformed lines
-		}
-
-		// Capture metadata from the first record that has each field
-		if record.GitBranch != "" && meta.GitBranch == "" {
-			meta.GitBranch = record.GitBranch
-		}
-		if record.CWD != "" && meta.CWD == "" {
-			meta.CWD = record.CWD
-		}
-
-		// Only process assistant messages with tool calls
-		if record.Type != "assistant" || record.Message == nil {
-			continue
-		}
-
-		for _, content := range record.Message.Content {
-			if content.Type != "tool_use" {
-				continue
-			}
-
-			entry := CommandEntry{
-				ToolName:   content.Name,
-				SessionID:  record.SessionID,
-				UUID:       record.UUID,
-				LineNumber: lineNumber,
-				FilePath:   path,
-			}
-
-			// Parse input and extract display string
-			var input GenericInput
-			if err := json.Unmarshal(content.Input, &input); err == nil {
-				entry.RawCommand = input.ExtractDisplayString(content.Name)
-			}
-
-			// Fall back to tool name if no display string extracted
-			if entry.RawCommand == "" {
-				entry.RawCommand = content.Name
-			}
-
-			// Extract pattern (Bash gets special treatment for command grouping)
-			if content.Name == "Bash" {
-				entry.Pattern = ExtractPattern("Bash", input.Command)
-			} else {
-				entry.Pattern = content.Name
-			}
-
-			// Skip if pattern should be excluded
-			if !ShouldInclude(entry.Pattern) {
-				continue
-			}
-
-			// Create unique key for deduplication
-			entryKey := record.UUID + content.Name
-			if seen[entryKey] {
-				continue
-			}
-			seen[entryKey] = true
-
-			// Parse timestamp
-			if t, err := time.Parse(time.RFC3339, record.Timestamp); err == nil {
-				entry.Timestamp = t
-			} else {
-				entry.Timestamp = time.Now()
-			}
-
-			// Only add if we got a valid command/path
-			if entry.RawCommand != "" {
-				commands = append(commands, entry)
-			}
-		}
+		ps.processLine(scanner.Bytes())
 	}
 
-	return commands, meta, scanner.Err()
+	return ps.commands, ps.meta, scanner.Err()
 }
 
 // ParseSessionFileFrom reads a JSONL file starting from a byte offset
 // Returns commands found, metadata, new offset, new line number, and any error
-func ParseSessionFileFrom(path string, offset int64, startLine int) ([]CommandEntry, SessionMetadata, int64, int, error) {
+func ParseSessionFileFrom(path string, offset int64, startLine int) (commands []CommandEntry, meta SessionMetadata, newOffset int64, newLine int, err error) {
 	file, err := os.Open(path)
 	if err != nil {
 		return nil, SessionMetadata{}, offset, startLine, err
@@ -247,90 +277,17 @@ func ParseSessionFileFrom(path string, offset int64, startLine int) ([]CommandEn
 		}
 	}
 
-	var commands []CommandEntry
-	var meta SessionMetadata
-	seen := make(map[string]bool)
-	lineNumber := startLine
+	ps := newParseState(path, startLine, offset)
 
 	scanner := bufio.NewScanner(file)
 	buf := make([]byte, 0, 64*1024)
 	scanner.Buffer(buf, 2*1024*1024)
 
 	for scanner.Scan() {
-		line := scanner.Bytes()
-		offset += int64(len(line)) + 1 // +1 for newline
-		lineNumber++
-
-		var record JSONLRecord
-		if err := json.Unmarshal(line, &record); err != nil {
-			continue
-		}
-
-		// Capture metadata from records that have it
-		if record.CWD != "" && meta.CWD == "" {
-			meta.CWD = record.CWD
-		}
-		if record.GitBranch != "" && meta.GitBranch == "" {
-			meta.GitBranch = record.GitBranch
-		}
-
-		if record.Type != "assistant" || record.Message == nil {
-			continue
-		}
-
-		for _, content := range record.Message.Content {
-			if content.Type != "tool_use" {
-				continue
-			}
-
-			entry := CommandEntry{
-				ToolName:   content.Name,
-				SessionID:  record.SessionID,
-				UUID:       record.UUID,
-				LineNumber: lineNumber,
-				FilePath:   path,
-			}
-
-			// Parse input and extract display string
-			var input GenericInput
-			if err := json.Unmarshal(content.Input, &input); err == nil {
-				entry.RawCommand = input.ExtractDisplayString(content.Name)
-			}
-
-			// Fall back to tool name if no display string extracted
-			if entry.RawCommand == "" {
-				entry.RawCommand = content.Name
-			}
-
-			// Extract pattern (Bash gets special treatment for command grouping)
-			if content.Name == "Bash" {
-				entry.Pattern = ExtractPattern("Bash", input.Command)
-			} else {
-				entry.Pattern = content.Name
-			}
-
-			// Skip if pattern should be excluded
-			if !ShouldInclude(entry.Pattern) {
-				continue
-			}
-
-			entryKey := record.UUID + content.Name
-			if seen[entryKey] {
-				continue
-			}
-			seen[entryKey] = true
-
-			if t, err := time.Parse(time.RFC3339, record.Timestamp); err == nil {
-				entry.Timestamp = t
-			}
-
-			if entry.RawCommand != "" {
-				commands = append(commands, entry)
-			}
-		}
+		ps.offset += int64(ps.processLine(scanner.Bytes()))
 	}
 
-	return commands, meta, offset, lineNumber, scanner.Err()
+	return ps.commands, ps.meta, ps.offset, ps.lineNumber, scanner.Err()
 }
 
 // ToolInput holds the full parsed input for a tool call, loaded on demand
@@ -348,7 +305,7 @@ type ToolInput struct {
 // FetchToolInput reads a tool call record and its result from a JSONL file.
 // It first tries the line number (fast path), then falls back to UUID-based search.
 // After finding the tool_use, it scans ahead to find the matching tool_result.
-func FetchToolInput(filePath string, lineNumber int, toolName string, uuid string) (*ToolInput, error) {
+func FetchToolInput(filePath string, lineNumber int, toolName, uuid string) (*ToolInput, error) {
 	file, err := os.Open(filePath)
 	if err != nil {
 		return nil, err
@@ -359,85 +316,88 @@ func FetchToolInput(filePath string, lineNumber int, toolName string, uuid strin
 	buf := make([]byte, 0, 64*1024)
 	scanner.Buffer(buf, 2*1024*1024)
 
-	var input *ToolInput
-	var lines [][]byte // Buffer lines to search for result
-
-	// First, try the fast path: read the specific line
-	currentLine := 0
-	for scanner.Scan() {
-		currentLine++
-		line := make([]byte, len(scanner.Bytes()))
-		copy(line, scanner.Bytes())
-
-		if currentLine == lineNumber {
-			input = tryParseToolInput(line, toolName, uuid)
-			if input != nil {
-				// Continue reading to find the result
-				lines = append(lines, line)
-			}
-		} else if input != nil {
-			// After finding the tool_use, collect lines to search for result
-			lines = append(lines, line)
-			// Only look ahead a few lines for the result
-			if len(lines) > 10 {
-				break
-			}
-		}
-	}
+	result := scanForToolInput(scanner, lineNumber, toolName, uuid)
 
 	if err := scanner.Err(); err != nil {
 		return nil, err
 	}
 
-	// If fast path found the input, search for result in collected lines
-	if input != nil {
-		findToolResult(input, lines)
-		return input, nil
+	if result.input != nil {
+		findToolResult(result.input, result.lines)
+		return result.input, nil
 	}
 
-	// Fast path failed - fall back to UUID-based search
-	file.Close()
-	file, err = os.Open(filePath)
-	if err != nil {
-		return nil, err
-	}
-	defer file.Close()
-
-	scanner = bufio.NewScanner(file)
-	scanner.Buffer(make([]byte, 0, 64*1024), 2*1024*1024)
-
-	lines = nil
-	for scanner.Scan() {
-		line := make([]byte, len(scanner.Bytes()))
-		copy(line, scanner.Bytes())
-
-		if input == nil {
-			input = tryParseToolInput(line, toolName, uuid)
-			if input != nil {
-				lines = append(lines, line)
-			}
-		} else {
-			lines = append(lines, line)
-			if len(lines) > 10 {
-				break
-			}
-		}
-	}
-
-	if err := scanner.Err(); err != nil {
-		return nil, err
-	}
-
-	if input != nil {
-		findToolResult(input, lines)
+	// Fast path failed - search through collected lines by UUID
+	if input := searchFallbackLines(result.allLines, toolName, uuid); input != nil {
 		return input, nil
 	}
 
 	return nil, fmt.Errorf("tool %s with UUID %s not found", toolName, uuid)
 }
 
+// scanResult holds the result of scanning a file for tool input
+type scanResult struct {
+	input    *ToolInput
+	lines    [][]byte // Lines for result search
+	allLines [][]byte // All lines for fallback search
+}
+
+// scanForToolInput scans through the file trying to find the tool input
+func scanForToolInput(scanner *bufio.Scanner, lineNumber int, toolName, uuid string) scanResult {
+	var result scanResult
+	needFallback := false
+	currentLine := 0
+
+	for scanner.Scan() {
+		currentLine++
+		line := make([]byte, len(scanner.Bytes()))
+		copy(line, scanner.Bytes())
+
+		// Try fast path: check the target line number
+		if currentLine == lineNumber && result.input == nil {
+			result.input = tryParseToolInput(line, toolName, uuid)
+			if result.input != nil {
+				result.lines = append(result.lines, line)
+				continue
+			}
+			needFallback = true
+		}
+
+		switch {
+		case result.input != nil:
+			result.lines = append(result.lines, line)
+			if len(result.lines) > 10 {
+				return result
+			}
+		case needFallback:
+			result.allLines = append(result.allLines, line)
+		case currentLine < lineNumber:
+			result.allLines = append(result.allLines, line)
+		}
+	}
+
+	return result
+}
+
+// searchFallbackLines searches through collected lines by UUID
+func searchFallbackLines(allLines [][]byte, toolName, uuid string) *ToolInput {
+	for i, line := range allLines {
+		input := tryParseToolInput(line, toolName, uuid)
+		if input != nil {
+			// Collect following lines for result search
+			lines := [][]byte{line}
+			for j := i + 1; j < len(allLines) && len(lines) <= 10; j++ {
+				lines = append(lines, allLines[j])
+			}
+			findToolResult(input, lines)
+			return input
+		}
+	}
+	return nil
+}
+
 // tryParseToolInput attempts to parse a line and extract the tool input if it matches
-func tryParseToolInput(line []byte, toolName string, uuid string) *ToolInput {
+func tryParseToolInput(line []byte, toolName, uuid string) *ToolInput {
 	var record JSONLRecord
 	if err := json.Unmarshal(line, &record); err != nil {
 		return nil

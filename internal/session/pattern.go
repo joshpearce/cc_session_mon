@@ -92,36 +92,31 @@ func extractBashPattern(command string) string {
 	}
 
 	// Check for sudo prefix and preserve it
-	hasSudo := false
-	if words[0] == "sudo" {
-		hasSudo = true
+	hasSudo := words[0] == "sudo"
+	if hasSudo {
 		words = skipSudoFlags(words[1:])
-		if len(words) == 0 {
-			return "Bash(sudo:*)"
-		}
 	}
 
 	// Handle command wrappers (env, time, nice, etc.)
 	words = unwrapCommand(words)
-	if len(words) == 0 {
-		if hasSudo {
-			return "Bash(sudo:*)"
-		}
-		return "Bash"
-	}
 
 	// Handle shell -c "subcommand"
-	if isShell(words[0]) {
+	if len(words) > 0 && isShell(words[0]) {
 		words = extractShellCommand(words)
-		if len(words) == 0 {
-			if hasSudo {
-				return "Bash(sudo:*)"
-			}
-			return "Bash"
-		}
+	}
+
+	// Check for empty command after all unwrapping
+	if len(words) == 0 {
+		return bashPattern(hasSudo, nil)
 	}
 
 	// Build pattern parts
+	parts := buildPatternParts(hasSudo, words)
+	return bashPattern(hasSudo, parts)
+}
+
+// buildPatternParts builds the pattern parts from command words
+func buildPatternParts(hasSudo bool, words []string) []string {
 	var parts []string
 	if hasSudo {
 		parts = append(parts, "sudo")
@@ -130,23 +125,49 @@ func extractBashPattern(command string) string {
 	cmd := words[0]
 	parts = append(parts, cmd)
 
-	// Check if command has subcommands to capture
+	// Extract subcommands based on depth config
+	subcommands := extractSubcommands(cmd, words[1:])
+	parts = append(parts, subcommands...)
+
+	return parts
+}
+
+// extractSubcommands extracts subcommands from args based on the command's depth
+func extractSubcommands(cmd string, args []string) []string {
 	depth := subcommandDepth[cmd]
-	if depth > 0 && len(words) > 1 {
-		subArgs := words[1:]
-		for i := 0; i < depth && len(subArgs) > 0; i++ {
-			// Skip flags to find the subcommand
-			for len(subArgs) > 0 && strings.HasPrefix(subArgs[0], "-") {
-				subArgs = subArgs[1:]
-			}
-			if len(subArgs) == 0 {
-				break
-			}
-			parts = append(parts, subArgs[0])
-			subArgs = subArgs[1:]
-		}
+	if depth == 0 || len(args) == 0 {
+		return nil
 	}
 
+	var subcommands []string
+	for i := 0; i < depth && len(args) > 0; i++ {
+		// Skip flags to find the subcommand
+		args = skipFlags(args)
+		if len(args) == 0 {
+			break
+		}
+		subcommands = append(subcommands, args[0])
+		args = args[1:]
+	}
+	return subcommands
+}
+
+// skipFlags skips leading flag arguments
+func skipFlags(args []string) []string {
+	for len(args) > 0 && strings.HasPrefix(args[0], "-") {
+		args = args[1:]
+	}
+	return args
+}
+
+// bashPattern formats a Bash pattern from parts
+func bashPattern(hasSudo bool, parts []string) string {
+	if len(parts) == 0 {
+		if hasSudo {
+			return "Bash(sudo:*)"
+		}
+		return "Bash"
+	}
 	return "Bash(" + strings.Join(parts, ":") + ":*)"
 }
 
@@ -187,44 +208,60 @@ func unwrapCommand(words []string) []string {
 
 	switch words[0] {
 	case "env":
-		// env VAR=val command or env -i command
-		for i := 1; i < len(words); i++ {
-			if strings.Contains(words[i], "=") || strings.HasPrefix(words[i], "-") {
-				continue
-			}
-			return words[i:]
-		}
-		return nil
+		return unwrapEnv(words)
 	case "time", "nohup", "strace", "ltrace":
-		// Simple wrappers that take a command directly
-		if len(words) > 1 {
-			return words[1:]
-		}
-		return nil
+		return unwrapSimple(words)
 	case "nice":
-		// nice can have -n VALUE, skip flags and their arguments
-		for i := 1; i < len(words); i++ {
-			if words[i] == "-n" && i+1 < len(words) {
-				i++ // skip the priority value
-				continue
-			}
-			if strings.HasPrefix(words[i], "-") {
-				continue
-			}
+		return unwrapNice(words)
+	case "xargs":
+		return unwrapXargs(words)
+	default:
+		return words
+	}
+}
+
+// unwrapEnv handles: env VAR=val command or env -i command
+func unwrapEnv(words []string) []string {
+	for i := 1; i < len(words); i++ {
+		if strings.Contains(words[i], "=") || strings.HasPrefix(words[i], "-") {
+			continue
+		}
+		return words[i:]
+	}
+	return nil
+}
+
+// unwrapSimple handles wrappers that just prefix a command (time, nohup, etc.)
+func unwrapSimple(words []string) []string {
+	if len(words) > 1 {
+		return words[1:]
+	}
+	return nil
+}
+
+// unwrapNice handles: nice -n VALUE command
+func unwrapNice(words []string) []string {
+	for i := 1; i < len(words); i++ {
+		if words[i] == "-n" && i+1 < len(words) {
+			i++ // skip the priority value
+			continue
+		}
+		if strings.HasPrefix(words[i], "-") {
+			continue
+		}
+		return words[i:]
+	}
+	return nil
+}
+
+// unwrapXargs handles: xargs [flags] command
+func unwrapXargs(words []string) []string {
+	for i := 1; i < len(words); i++ {
+		if !strings.HasPrefix(words[i], "-") {
 			return words[i:]
 		}
-		return nil
-	case "xargs":
-		// Find the command after xargs flags
-		for i := 1; i < len(words); i++ {
-			if !strings.HasPrefix(words[i], "-") {
-				return words[i:]
-			}
-		}
-		return nil
 	}
-
-	return words
+	return nil
 }
 
 // isShell returns true if the command is a shell

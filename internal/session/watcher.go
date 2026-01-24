@@ -28,6 +28,10 @@ type Watcher struct {
 	subagentMap map[string]string   // maps subagent file path -> main session file path
 	mu          sync.RWMutex
 
+	// Cached sorted sessions to avoid re-sorting on every GetSessions call
+	sortedCache      []*Session
+	sortedCacheValid bool
+
 	Events chan WatchEvent
 	Errors chan error
 	done   chan struct{}
@@ -85,6 +89,7 @@ func (w *Watcher) DiscoverSessions() ([]*Session, error) {
 			if session != nil {
 				sessions = append(sessions, session)
 				w.sessions[jsonlPath] = session
+				w.invalidateSortedCache()
 
 				// Track file size for incremental updates
 				if info, err := os.Stat(jsonlPath); err == nil {
@@ -103,7 +108,10 @@ func (w *Watcher) DiscoverSessions() ([]*Session, error) {
 					}
 					// Watch the subagent directory for new files
 					if len(subagentFiles) > 0 {
-						w.fsWatcher.Add(subagentDir)
+						if err := w.fsWatcher.Add(subagentDir); err != nil {
+							// Non-fatal: continue without watching this directory
+							continue
+						}
 					}
 				}
 			}
@@ -295,6 +303,7 @@ func (w *Watcher) handleFileUpdate(path string) {
 	session.Commands = append(session.Commands, newCommands...)
 	session.LastActivity = time.Now()
 	session.IsActive = true
+	w.invalidateSortedCache()
 
 	// Send event
 	select {
@@ -336,6 +345,7 @@ func (w *Watcher) handleNewFile(path string) {
 				session.Commands = append(session.Commands, commands...)
 				session.LastActivity = time.Now()
 				session.IsActive = true
+				w.invalidateSortedCache()
 
 				// Send event
 				select {
@@ -366,6 +376,7 @@ func (w *Watcher) handleNewFile(path string) {
 	}
 
 	w.sessions[path] = session
+	w.invalidateSortedCache()
 
 	// Track file size
 	if info, err := os.Stat(path); err == nil {
@@ -382,22 +393,55 @@ func (w *Watcher) handleNewFile(path string) {
 	}
 }
 
-// GetSessions returns a copy of all tracked sessions
+// GetSessions returns all tracked sessions, sorted by last activity.
+// Uses a cached sorted slice to avoid re-sorting on every call.
 func (w *Watcher) GetSessions() []*Session {
 	w.mu.RLock()
-	defer w.mu.RUnlock()
+	if w.sortedCacheValid {
+		result := make([]*Session, len(w.sortedCache))
+		copy(result, w.sortedCache)
+		w.mu.RUnlock()
+		return result
+	}
+	w.mu.RUnlock()
 
-	sessions := make([]*Session, 0, len(w.sessions))
-	for _, s := range w.sessions {
-		sessions = append(sessions, s)
+	// Cache is invalid, need to rebuild with write lock
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	// Double-check after acquiring write lock
+	if w.sortedCacheValid {
+		result := make([]*Session, len(w.sortedCache))
+		copy(result, w.sortedCache)
+		return result
 	}
 
-	// Sort by last activity
-	sort.Slice(sessions, func(i, j int) bool {
-		return sessions[i].LastActivity.After(sessions[j].LastActivity)
+	w.rebuildSortedCache()
+
+	result := make([]*Session, len(w.sortedCache))
+	copy(result, w.sortedCache)
+	return result
+}
+
+// rebuildSortedCache rebuilds the sorted session cache.
+// Must be called with w.mu held for writing.
+func (w *Watcher) rebuildSortedCache() {
+	w.sortedCache = make([]*Session, 0, len(w.sessions))
+	for _, s := range w.sessions {
+		w.sortedCache = append(w.sortedCache, s)
+	}
+
+	sort.Slice(w.sortedCache, func(i, j int) bool {
+		return w.sortedCache[i].LastActivity.After(w.sortedCache[j].LastActivity)
 	})
 
-	return sessions
+	w.sortedCacheValid = true
+}
+
+// invalidateSortedCache marks the sorted cache as needing rebuild.
+// Must be called with w.mu held for writing.
+func (w *Watcher) invalidateSortedCache() {
+	w.sortedCacheValid = false
 }
 
 // RefreshActivityStatus updates IsActive flag for all sessions

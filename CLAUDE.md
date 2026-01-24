@@ -42,6 +42,10 @@ Session parsing and monitoring:
 - `make test` - Run tests
 - `make lint` - Run golangci-lint
 
+## Development Workflow
+
+Pre-commit hooks run golangci-lint automatically on staged files. The `.golangci.yml` config enables strict linting (errcheck, gosec, gocyclo, etc.) with relaxed rules for test files.
+
 ## Key Libraries
 
 - [Bubbletea](https://github.com/charmbracelet/bubbletea) - TUI framework

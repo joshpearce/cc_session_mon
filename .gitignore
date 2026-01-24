@@ -29,3 +29,6 @@ Thumbs.db
 # Nix
 .direnv/
 result
+
+# Git worktrees
+.worktrees/
