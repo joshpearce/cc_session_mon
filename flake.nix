@@ -48,6 +48,7 @@
       };
 
       partitionedAttrs = {
+        apps = "dev";
         checks = "dev";
         devShells = "dev";
       };

@@ -1,58 +1,59 @@
+version: "2"
 run:
-  timeout: 3m
   tests: true
-
 linters:
   enable:
-    # Correctness - catch bugs and suspicious constructs
-    - errcheck      # Unchecked errors
-    - govet         # Suspicious constructs (default)
-    - staticcheck   # Go static analysis (default)
-    - ineffassign   # Unused assignments (default)
-    - unused        # Unused code (default)
-    - exhaustive    # Incomplete switch/map statements
-
-    # Security - vulnerability detection
-    - gosec         # Security issues
-
-    # Performance - efficiency problems
-    - bodyclose     # HTTP response body not closed
-    - prealloc      # Slice pre-allocation opportunities
-    - noctx         # HTTP requests without context
-    - copyloopvar   # Loop variable copies (Go 1.22+)
-
-    # Quality - maintainability and style
-    - gocyclo       # Cyclomatic complexity
-    - funlen        # Function length
-    - gocritic      # Bug/performance/style diagnostics
-    - unconvert     # Unnecessary type conversions
-    - unparam       # Unused function parameters
-    - misspell      # Common misspellings
-
-linters-settings:
-  gocyclo:
-    min-complexity: 15
-  funlen:
-    lines: 80
-    statements: 50
-  gocritic:
-    enabled-tags:
-      - diagnostic
-      - performance
-      - style
-    disabled-checks:
-      - hugeParam  # Too strict for TUI model structs
-
+    - bodyclose
+    - copyloopvar
+    - exhaustive
+    - funlen
+    - gocritic
+    - gocyclo
+    - gosec
+    - misspell
+    - noctx
+    - prealloc
+    - unconvert
+    - unparam
+  settings:
+    funlen:
+      lines: 80
+      statements: 50
+    gocritic:
+      disabled-checks:
+        - hugeParam
+      enabled-tags:
+        - diagnostic
+        - performance
+        - style
+    gocyclo:
+      min-complexity: 15
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - common-false-positives
+      - legacy
+      - std-error-handling
+    rules:
+      - linters:
+          - errcheck
+          - funlen
+          - gocyclo
+          - gosec
+          - unparam
+        path: _test\.go
+    paths:
+      - third_party$
+      - builtin$
+      - examples$
 issues:
-  exclude-rules:
-    # Test files: relax complexity and security rules
-    - path: _test\.go
-      linters:
-        - gocyclo
-        - funlen
-        - gosec
-        - unparam
-        - errcheck
-
   max-issues-per-linter: 0
   max-same-issues: 0
+formatters:
+  exclusions:
+    generated: lax
+    paths:
+      - third_party$
+      - builtin$
+      - examples$
