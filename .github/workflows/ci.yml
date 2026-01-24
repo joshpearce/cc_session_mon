@@ -1,0 +1,28 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  go:
+    uses: ./.github/workflows/ci_go.yml
+
+  nix:
+    uses: ./.github/workflows/ci_nix.yml
+
+  ci_complete:
+    name: CI Complete
+    needs: [go, nix]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Check all jobs passed
+        run: |
+          if [[ "${{ needs.go.result }}" != "success" ]] || [[ "${{ needs.nix.result }}" != "success" ]]; then
+            echo "One or more jobs failed"
+            exit 1
+          fi
+          echo "All jobs passed"

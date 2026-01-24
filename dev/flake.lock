@@ -1,0 +1,98 @@
+{
+  "nodes": {
+    "devshell": {
+      "inputs": {
+        "nixpkgs": "nixpkgs"
+      },
+      "locked": {
+        "lastModified": 1768818222,
+        "narHash": "sha256-460jc0+CZfyaO8+w8JNtlClB2n4ui1RbHfPTLkpwhU8=",
+        "owner": "numtide",
+        "repo": "devshell",
+        "rev": "255a2b1725a20d060f566e4755dbf571bbbb5f76",
+        "type": "github"
+      },
+      "original": {
+        "owner": "numtide",
+        "repo": "devshell",
+        "type": "github"
+      }
+    },
+    "generate-go-sri": {
+      "inputs": {
+        "nixpkgs": "nixpkgs_2",
+        "tailscale": "tailscale"
+      },
+      "locked": {
+        "lastModified": 1757686793,
+        "narHash": "sha256-1VcFAVY+BsKn3fiOObrKjZG5hb/k52B7BxB/JHwyxVo=",
+        "owner": "antifuchs",
+        "repo": "generate-go-sri",
+        "rev": "1ce154eed2fa99ed747a274bbe70ad66666612da",
+        "type": "github"
+      },
+      "original": {
+        "owner": "antifuchs",
+        "repo": "generate-go-sri",
+        "type": "github"
+      }
+    },
+    "nixpkgs": {
+      "locked": {
+        "lastModified": 1762156382,
+        "narHash": "sha256-Yg7Ag7ov5+36jEFC1DaZh/12SEXo6OO3/8rqADRxiqs=",
+        "owner": "NixOS",
+        "repo": "nixpkgs",
+        "rev": "7241bcbb4f099a66aafca120d37c65e8dda32717",
+        "type": "github"
+      },
+      "original": {
+        "owner": "NixOS",
+        "ref": "nixpkgs-unstable",
+        "repo": "nixpkgs",
+        "type": "github"
+      }
+    },
+    "nixpkgs_2": {
+      "locked": {
+        "lastModified": 1757584362,
+        "narHash": "sha256-XeTX/w16rUNUNBsfaOVCDoMMa7Xu7KvIMT7tn1zIEcg=",
+        "owner": "NixOS",
+        "repo": "nixpkgs",
+        "rev": "d33e926c80e6521a55da380a4c4c44a7462af405",
+        "type": "github"
+      },
+      "original": {
+        "owner": "NixOS",
+        "ref": "nixpkgs-unstable",
+        "repo": "nixpkgs",
+        "type": "github"
+      }
+    },
+    "root": {
+      "inputs": {
+        "devshell": "devshell",
+        "generate-go-sri": "generate-go-sri"
+      }
+    },
+    "tailscale": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1757355219,
+        "narHash": "sha256-rrT/oOkdMcSfSL45Lt87cL8rxt7MUbMs/ziL9O7hmOE=",
+        "owner": "tailscale",
+        "repo": "tailscale",
+        "rev": "2da52dce7aba5150b7b9e637b9fb0d7307fed916",
+        "type": "github"
+      },
+      "original": {
+        "owner": "tailscale",
+        "repo": "tailscale",
+        "rev": "2da52dce7aba5150b7b9e637b9fb0d7307fed916",
+        "type": "github"
+      }
+    }
+  },
+  "root": "root",
+  "version": 7
+}

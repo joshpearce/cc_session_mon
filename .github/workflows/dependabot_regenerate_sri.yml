@@ -1,0 +1,37 @@
+name: Regenerate SRI Hash
+
+on:
+  pull_request:
+    paths:
+      - go.mod
+      - go.sum
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  regenerate-sri:
+    name: Regenerate SRI Hash
+    runs-on: ubuntu-latest
+    if: github.actor == 'dependabot[bot]'
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: DeterminateSystems/nix-installer-action@main
+
+      - uses: DeterminateSystems/magic-nix-cache-action@main
+
+      - name: Regenerate SRI hash
+        run: nix run .#generate-sri-cc-session-mon
+
+      - name: Commit updated SRI hash
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "chore: regenerate SRI hash for dependency update"
+          file_pattern: "*.sri"

@@ -1,34 +1,67 @@
 {
   description = "Claude Code session monitoring TUI";
 
-  inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
-    flake-utils.url = "github:numtide/flake-utils";
-  };
-
-  outputs = { self, nixpkgs, flake-utils }:
-    flake-utils.lib.eachDefaultSystem (system:
-      let
-        pkgs = nixpkgs.legacyPackages.${system};
-      in {
+  outputs = inputs @ {
+    self,
+    flake-parts,
+    ...
+  }:
+    flake-parts.lib.mkFlake {inherit inputs;} {
+      imports = [
+        inputs.flake-parts.flakeModules.easyOverlay
+        inputs.flake-parts.flakeModules.partitions
+      ];
+      systems = [
+        "x86_64-darwin"
+        "x86_64-linux"
+        "aarch64-darwin"
+        "aarch64-linux"
+      ];
+      perSystem = {
+        config,
+        lib,
+        pkgs,
+        ...
+      }: {
+        overlayAttrs = {
+          inherit (config.packages) cc-session-mon;
+        };
         packages = {
+          default = config.packages.cc-session-mon;
           cc-session-mon = pkgs.buildGo125Module {
             pname = "cc-session-mon";
             version = "0.1.0";
-            src = ./.;
-            vendorHash = "sha256-Dv8puCTuUDT/FSY8tyegj4ZkZ3zsU88xYYLFRhX3qWU=";
-            ldflags = [ "-s" "-w" ];
+            vendorHash = builtins.readFile ./cc-session-mon.sri;
+            src = lib.sourceFilesBySuffices (lib.sources.cleanSource ./.) [
+              ".go"
+              ".mod"
+              ".sum"
+            ];
+            ldflags = [
+              "-s"
+              "-w"
+            ];
           };
-          default = self.packages.${system}.cc-session-mon;
         };
 
-        devShells.default = pkgs.mkShell {
-          buildInputs = with pkgs; [ go_1_25 gopls golangci-lint ];
-        };
-      }
-    ) // {
-      overlays.default = final: prev: {
-        cc-session-mon = self.packages.${prev.system}.cc-session-mon;
+        formatter = pkgs.alejandra;
+      };
+
+      partitionedAttrs = {
+        checks = "dev";
+        devShells = "dev";
+      };
+      partitions.dev = {
+        extraInputsFlake = ./dev;
+        module = ./dev/flake-part.nix;
+      };
+      flake = {
+        overlays.default = inputs.self.overlays.additions;
       };
     };
+
+  inputs = {
+    flake-parts.url = "github:hercules-ci/flake-parts";
+    nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
+  };
 }
