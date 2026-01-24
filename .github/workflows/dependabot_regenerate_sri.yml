@@ -31,7 +31,7 @@ jobs:
         run: nix run .#generate-sri-cc-session-mon
 
       - name: Commit updated SRI hash
-        uses: stefanzweifel/git-auto-commit-action@v5
+        uses: stefanzweifel/git-auto-commit-action@v7
         with:
           commit_message: "chore: regenerate SRI hash for dependency update"
           file_pattern: "*.sri"
