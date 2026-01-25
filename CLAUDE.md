@@ -36,6 +36,15 @@ Session parsing and monitoring:
 
 ## Commands
 
+### Nix (preferred)
+
+- `nix build` - Build with Nix
+- `nix run` - Run directly
+- `nix develop` - Enter dev shell with Go, gopls, golangci-lint
+- `regenSRI` - Regenerate SRI hash after go.mod/go.sum changes (in dev shell)
+
+### Make
+
 - `make deps` - Install/update dependencies
 - `make build` - Build binary to `bin/cc_session_mon`
 - `make run` - Run the application
@@ -44,7 +53,23 @@ Session parsing and monitoring:
 
 ## Development Workflow
 
-Pre-commit hooks run golangci-lint automatically on staged files. The `.golangci.yml` config enables strict linting (errcheck, gosec, gocyclo, etc.) with relaxed rules for test files.
+Uses direnv with Nix flakes. The `.envrc` activates the dev shell automatically.
+
+Pre-commit hooks (lefthook) run golangci-lint automatically on staged files. The `.golangci.yml` (v2 format) enables strict linting with relaxed rules for test files.
+
+### CI
+
+GitHub Actions CI runs on PRs:
+- **ci_go.yml**: lint (golangci-lint v2), test, build
+- **ci_nix.yml**: flake check, nix build
+- **dependabot_regenerate_sri.yml**: auto-regenerates SRI hash when go.mod/go.sum change
+
+### Nix Flake Structure
+
+The flake uses flake-parts with partitions:
+- Main flake: packages only (lightweight for consumers)
+- Dev partition (`dev/`): devshell, generate-go-sri for `regenSRI` command
+- `cc-session-mon.sri`: vendorHash read from file for reproducible builds
 
 ## Key Libraries
 

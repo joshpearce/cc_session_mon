@@ -1,6 +1,11 @@
 {
   description = "Claude Code session monitoring TUI";
 
+  inputs = {
+    flake-parts.url = "github:hercules-ci/flake-parts";
+    nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
+  };
+
   outputs = inputs @ {
     self,
     flake-parts,
@@ -60,9 +65,4 @@
         overlays.default = inputs.self.overlays.additions;
       };
     };
-
-  inputs = {
-    flake-parts.url = "github:hercules-ci/flake-parts";
-    nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
-  };
 }

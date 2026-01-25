@@ -12,10 +12,27 @@ A terminal user interface for monitoring Claude Code sessions in real-time. Buil
 
 ## Prerequisites
 
-- Go 1.22 or later
-- (Optional) [golangci-lint](https://golangci-lint.run/) for linting
+- Go 1.25 or later
+- Or [Nix](https://nixos.org/) with flakes enabled
 
 ## Quick Start
+
+### With Nix (recommended)
+
+```bash
+# Build with Nix
+nix build
+
+# Run directly
+nix run
+
+# Or enter dev shell with all tools
+nix develop
+```
+
+If you have [direnv](https://direnv.net/) installed, the dev shell activates automatically when you `cd` into the project.
+
+### With Make
 
 ```bash
 # Install dependencies
@@ -139,7 +156,17 @@ make lint
 
 # Clean build artifacts
 make clean
+
+# Regenerate SRI hash after changing go.mod/go.sum (in nix develop shell)
+regenSRI
 ```
+
+### CI
+
+GitHub Actions runs on every PR:
+- **Go CI**: lint, test, build
+- **Nix CI**: flake check, nix build
+- **Dependabot**: weekly dependency updates with automatic SRI hash regeneration
 
 ## Project Structure
 
@@ -164,6 +191,8 @@ cc_session_mon/
 │       ├── styles.go          # Lipgloss styles and theming
 │       └── delegates.go       # List item delegates
 ├── Makefile                   # Build commands
+├── flake.nix                  # Nix flake definition
+├── dev/                       # Nix dev partition (devshell, SRI tooling)
 └── go.mod                     # Go module definition
 ```
 
