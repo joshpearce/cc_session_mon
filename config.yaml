@@ -345,13 +345,18 @@ tool_groups:
       - "Bash(tmux:*)"
 
   # ============================================================================
-  # TASK/AGENT - Claude agent spawning
+  # TASK/AGENT - Claude agent spawning and task management
   # ============================================================================
   - name: task
     color: lavender
     patterns:
       - Task
       - TaskOutput
+      - TaskCreate
+      - TaskUpdate
+      - TaskList
+      - TaskGet
+      - TaskStop
 
   # ============================================================================
   # SHELL TOOLS - Interactive/helper tools
@@ -453,6 +458,7 @@ tool_groups:
       - Read
       - Glob
       - Grep
+      - LSP
       - TodoRead
       - TodoWrite
       - AskUserQuestion
