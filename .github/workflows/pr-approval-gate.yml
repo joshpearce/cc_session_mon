@@ -1,0 +1,13 @@
+name: PR Approval Gate
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  approval-gate:
+    runs-on: ubuntu-latest
+    environment: pr-approval
+    steps:
+      - name: Approval confirmed
+        run: echo "PR approved for merge"
