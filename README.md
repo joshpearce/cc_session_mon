@@ -167,6 +167,7 @@ GitHub Actions runs on every PR:
 - **Go CI**: lint, test, build
 - **Nix CI**: flake check, nix build
 - **Dependabot**: weekly dependency updates with automatic SRI hash regeneration
+- **PR Approval Gate**: environment-based approval required before merging
 
 ## Project Structure
 
