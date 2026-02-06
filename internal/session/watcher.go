@@ -3,6 +3,7 @@ package session
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -20,13 +21,14 @@ type WatchEvent struct {
 
 // Watcher monitors the Claude projects directory for session changes
 type Watcher struct {
-	fsWatcher   *fsnotify.Watcher
-	projectsDir string
-	sessions    map[string]*Session // keyed by main session file path
-	offsets     map[string]int64    // file read offsets for incremental parsing
-	lineNumbers map[string]int      // line numbers for incremental parsing (1-indexed, next line to read)
-	subagentMap map[string]string   // maps subagent file path -> main session file path
-	mu          sync.RWMutex
+	fsWatcher    *fsnotify.Watcher
+	projectsDirs []string           // multiple directories to monitor
+	sessions     map[string]*Session // keyed by main session file path
+	offsets      map[string]int64    // file read offsets for incremental parsing
+	lineNumbers  map[string]int      // line numbers for incremental parsing (1-indexed, next line to read)
+	subagentMap  map[string]string   // maps subagent file path -> main session file path
+	originMap    map[string]string   // maps projectsDir path to origin label (e.g. "local" or "devagent:container-name")
+	mu           sync.RWMutex
 
 	// Cached sorted sessions to avoid re-sorting on every GetSessions call
 	sortedCache      []*Session
@@ -38,22 +40,23 @@ type Watcher struct {
 }
 
 // NewWatcher creates a new session watcher
-func NewWatcher(projectsDir string) (*Watcher, error) {
+func NewWatcher(projectsDirs []string) (*Watcher, error) {
 	fsw, err := fsnotify.NewWatcher()
 	if err != nil {
 		return nil, err
 	}
 
 	w := &Watcher{
-		fsWatcher:   fsw,
-		projectsDir: projectsDir,
-		sessions:    make(map[string]*Session),
-		offsets:     make(map[string]int64),
-		lineNumbers: make(map[string]int),
-		subagentMap: make(map[string]string),
-		Events:      make(chan WatchEvent, 100),
-		Errors:      make(chan error, 10),
-		done:        make(chan struct{}),
+		fsWatcher:    fsw,
+		projectsDirs: projectsDirs,
+		sessions:     make(map[string]*Session),
+		offsets:      make(map[string]int64),
+		lineNumbers:  make(map[string]int),
+		subagentMap:  make(map[string]string),
+		originMap:    make(map[string]string),
+		Events:       make(chan WatchEvent, 100),
+		Errors:       make(chan error, 10),
+		done:         make(chan struct{}),
 	}
 
 	return w, nil
@@ -64,11 +67,36 @@ func (w *Watcher) DiscoverSessions() ([]*Session, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
+	sessions := make([]*Session, 0, len(w.projectsDirs)*4) //nolint:mnd // rough estimate
+
+	for _, projectsDir := range w.projectsDirs {
+		// Watch the projects directory so we detect new project subdirectories.
+		// If it doesn't exist yet (e.g., devagent container with no sessions),
+		// watch the parent directory so we detect when it gets created.
+		if err := w.fsWatcher.Add(projectsDir); err != nil {
+			_ = w.fsWatcher.Add(filepath.Dir(projectsDir))
+		}
+
+		found := w.discoverInDir(projectsDir)
+		sessions = append(sessions, found...)
+	}
+
+	// Sort by last activity (most recent first)
+	sort.Slice(sessions, func(i, j int) bool {
+		return sessions[i].LastActivity.After(sessions[j].LastActivity)
+	})
+
+	return sessions, nil
+}
+
+// discoverInDir scans a single projects directory for sessions.
+// Must be called with w.mu held for writing.
+func (w *Watcher) discoverInDir(projectsDir string) []*Session {
 	var sessions []*Session
 
-	entries, err := os.ReadDir(w.projectsDir)
+	entries, err := os.ReadDir(projectsDir)
 	if err != nil {
-		return nil, err
+		return nil
 	}
 
 	for _, entry := range entries {
@@ -76,22 +104,20 @@ func (w *Watcher) DiscoverSessions() ([]*Session, error) {
 			continue
 		}
 
-		projectDir := filepath.Join(w.projectsDir, entry.Name())
+		projectDir := filepath.Join(projectsDir, entry.Name())
 
-		// Find all JSONL files in this project directory
 		jsonlFiles, err := filepath.Glob(filepath.Join(projectDir, "*.jsonl"))
 		if err != nil {
 			continue
 		}
 
 		for _, jsonlPath := range jsonlFiles {
-			session := w.parseSessionFile(jsonlPath, entry.Name())
-			if session != nil {
-				sessions = append(sessions, session)
-				w.sessions[jsonlPath] = session
+			s := w.parseSessionFile(jsonlPath, entry.Name())
+			if s != nil {
+				sessions = append(sessions, s)
+				w.sessions[jsonlPath] = s
 				w.invalidateSortedCache()
 
-				// Track file size for incremental updates
 				if info, err := os.Stat(jsonlPath); err == nil {
 					w.offsets[jsonlPath] = info.Size()
 				}
@@ -106,30 +132,18 @@ func (w *Watcher) DiscoverSessions() ([]*Session, error) {
 							w.offsets[subPath] = info.Size()
 						}
 					}
-					// Watch the subagent directory for new files
 					if len(subagentFiles) > 0 {
-						if err := w.fsWatcher.Add(subagentDir); err != nil {
-							// Non-fatal: continue without watching this directory
-							continue
-						}
+						_ = w.fsWatcher.Add(subagentDir)
 					}
 				}
 			}
 		}
 
 		// Watch the project directory for new sessions
-		if err := w.fsWatcher.Add(projectDir); err != nil {
-			// Non-fatal: just skip this directory
-			continue
-		}
+		_ = w.fsWatcher.Add(projectDir)
 	}
 
-	// Sort by last activity (most recent first)
-	sort.Slice(sessions, func(i, j int) bool {
-		return sessions[i].LastActivity.After(sessions[j].LastActivity)
-	})
-
-	return sessions, nil
+	return sessions
 }
 
 // parseSessionFile creates a Session from a JSONL file
@@ -187,6 +201,15 @@ func (w *Watcher) parseSessionFile(path, encodedProject string) *Session {
 	// Consider active if modified in last 5 minutes
 	isActive := time.Since(lastActivity) < 5*time.Minute
 
+	// Determine origin by finding which projectsDir this path belongs to
+	origin := ""
+	for _, projectsDir := range w.projectsDirs {
+		if strings.HasPrefix(path, projectsDir+string(filepath.Separator)) || path == projectsDir {
+			origin = w.originMap[projectsDir]
+			break
+		}
+	}
+
 	return &Session{
 		ID:           sessionID,
 		ProjectPath:  projectPath,
@@ -195,9 +218,30 @@ func (w *Watcher) parseSessionFile(path, encodedProject string) *Session {
 		LastActivity: lastActivity,
 		Commands:     commands,
 		IsActive:     isActive,
+		Origin:       origin,
 	}
 }
 
+// AddProjectsDir adds a new directory to the list of directories to monitor.
+// Returns true if added, false if already tracked.
+func (w *Watcher) AddProjectsDir(dir string) bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	if slices.Contains(w.projectsDirs, dir) {
+		return false
+	}
+
+	w.projectsDirs = append(w.projectsDirs, dir)
+	return true
+}
+
+// SetOrigin sets the origin label for a projects directory.
+func (w *Watcher) SetOrigin(dir, label string) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.originMap[dir] = label
+}
 
 // Start begins watching for file changes
 func (w *Watcher) Start() {
@@ -238,7 +282,15 @@ func (w *Watcher) watchLoop() {
 
 // handleFSEvent processes a filesystem event
 func (w *Watcher) handleFSEvent(event fsnotify.Event) {
-	// Only care about JSONL files
+	if event.Op&fsnotify.Create == fsnotify.Create {
+		// New directory inside a watched projects dir — start watching it for session files
+		if info, err := os.Stat(event.Name); err == nil && info.IsDir() {
+			_ = w.fsWatcher.Add(event.Name)
+			return
+		}
+	}
+
+	// Only care about JSONL files for write/create events
 	if !strings.HasSuffix(event.Name, ".jsonl") {
 		return
 	}

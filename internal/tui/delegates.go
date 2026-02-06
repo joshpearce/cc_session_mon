@@ -68,14 +68,20 @@ func (d *sessionDelegate) Render(w io.Writer, m list.Model, index int, item list
 		indicator = "  "
 	}
 
+	// Add origin tag for devagent sessions
+	var originTag string
+	if i.session.Origin != "" && i.session.Origin != "local" {
+		originTag = "[da] "
+	}
+
 	name := i.session.ProjectPath
 	info := fmt.Sprintf(" %d cmds | %s",
 		len(i.session.Commands),
 		formatTimeAgo(i.session.LastActivity),
 	)
 
-	// Calculate available space for name
-	availableWidth := d.width - len(indicator) - len(info) - 2
+	// Calculate available space for name (use lipgloss.Width for Unicode-safe measurement)
+	availableWidth := d.width - lipgloss.Width(originTag) - lipgloss.Width(indicator) - lipgloss.Width(info) - 2
 	if availableWidth < 10 {
 		availableWidth = 10
 	}
@@ -85,7 +91,7 @@ func (d *sessionDelegate) Render(w io.Writer, m list.Model, index int, item list
 		name = name[:availableWidth-3] + "..."
 	}
 
-	row := indicator + name + strings.Repeat(" ", max(0, availableWidth-len(name))) + info
+	row := originTag + indicator + name + strings.Repeat(" ", max(0, availableWidth-len(name))) + info
 
 	// Apply styling
 	var style lipgloss.Style

@@ -58,7 +58,11 @@ func (m Model) View() string {
 
 // renderHeader renders the top header bar
 func (m Model) renderHeader() string {
-	title := TitleStyle().Render("Claude Code Session Monitor")
+	titleText := "Claude Code Session Monitor"
+	if m.followDevagent {
+		titleText += " [devagent]"
+	}
+	title := TitleStyle().Render(titleText)
 
 	// Session status
 	activeCount := 0
