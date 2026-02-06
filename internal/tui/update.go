@@ -8,6 +8,16 @@ import (
 
 // Update handles incoming messages and updates the model
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		return m.handleKeyPress(msg)
+	default:
+		return m.handleNonKeyMsg(msg)
+	}
+}
+
+// handleNonKeyMsg processes all non-keyboard messages
+func (m Model) handleNonKeyMsg(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
 
 	switch msg := msg.(type) {
@@ -15,9 +25,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = msg.Width
 		m.height = msg.Height
 		m = m.updateListSizes()
-
-	case tea.KeyMsg:
-		return m.handleKeyPress(msg)
 
 	case sessionsDiscoveredMsg:
 		m.sessions = msg
@@ -33,16 +40,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case sessionEventMsg:
 		m = m.handleSessionEvent(msg)
-		// Continue watching
 		cmds = append(cmds, m.watchSessionsCmd())
 
 	case tickMsg:
-		// Refresh activity status periodically
-		if m.watcher != nil {
-			m.watcher.RefreshActivityStatus()
-			m = m.updateSessionList()
-		}
+		m = m.handleTick()
 		cmds = append(cmds, m.tickCmd())
+		if m.followDevagent {
+			cmds = append(cmds, m.devagentRefreshCmd())
+		}
 
 	case errMsg:
 		m.err = msg.error
@@ -54,9 +59,24 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case detailErrorMsg:
 		m.loadingDetail = false
 		m.detailError = msg.error
+
+	case devagentRefreshMsg:
+		if newCmd := m.handleDevagentRefresh(msg); newCmd != nil {
+			cmds = append(cmds, newCmd)
+		}
 	}
 
 	// Update the active list component
+	m, listCmd := m.updateActiveList(msg)
+	if listCmd != nil {
+		cmds = append(cmds, listCmd)
+	}
+
+	return m, tea.Batch(cmds...)
+}
+
+// updateActiveList forwards a message to the currently active list component
+func (m Model) updateActiveList(msg tea.Msg) (Model, tea.Cmd) {
 	var cmd tea.Cmd
 	switch m.viewMode {
 	case ViewSessions:
@@ -66,11 +86,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case ViewPatterns:
 		m.patternList, cmd = m.patternList.Update(msg)
 	}
-	if cmd != nil {
-		cmds = append(cmds, cmd)
-	}
+	return m, cmd
+}
 
-	return m, tea.Batch(cmds...)
+// handleTick refreshes activity status on timer tick
+func (m Model) handleTick() Model {
+	if m.watcher != nil {
+		m.watcher.RefreshActivityStatus()
+		m = m.updateSessionList()
+	}
+	return m
 }
 
 // handleKeyPress processes keyboard input
@@ -147,6 +172,11 @@ func (m Model) handleViewSwitch(key string) (Model, bool) {
 func (m Model) cycleViewForward() Model {
 	switch m.viewMode {
 	case ViewSessions:
+		// Sync activeIdx to the currently highlighted session
+		if i := m.sessionList.Index(); i >= 0 && i < len(m.sessions) {
+			m.activeIdx = i
+			m = m.updateCommandList()
+		}
 		m.viewMode = ViewCommands
 	case ViewCommands:
 		m.viewMode = ViewPatterns
@@ -353,4 +383,26 @@ func (m Model) handleSessionEvent(event sessionEventMsg) Model {
 	m = m.aggregatePatterns()
 
 	return m
+}
+
+// handleDevagentRefresh processes devagent environment refresh
+func (m Model) handleDevagentRefresh(msg devagentRefreshMsg) tea.Cmd {
+	if m.watcher == nil {
+		return nil
+	}
+
+	newDirsAdded := false
+	for _, env := range msg.envs {
+		if m.watcher.AddProjectsDir(env.ProjectsDir) {
+			newDirsAdded = true
+		}
+		m.watcher.SetOrigin(env.ProjectsDir, "devagent:"+env.ContainerName)
+	}
+
+	// If new directories were added, discover sessions again
+	if newDirsAdded {
+		return m.discoverSessionsCmd()
+	}
+
+	return nil
 }

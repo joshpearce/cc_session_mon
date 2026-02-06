@@ -1,12 +1,14 @@
 # cc_session_mon
 
-A Go TUI application for monitoring Claude Code sessions using Bubbletea, Bubbles, and Lipgloss.
+Last verified: 2026-02-06
+
+A Go TUI application for monitoring Claude Code sessions using Bubbletea, Bubbles, and Lipgloss. Supports monitoring both local sessions and sessions running inside devagent containers.
 
 ## Architecture
 
 This app follows the Elm Architecture (Model-Update-View):
 
-- `internal/tui/model.go` - Application state, session management, pattern aggregation
+- `internal/tui/model.go` - Application state (`Model`, `ModelOptions`), session management, pattern aggregation
 - `internal/tui/update.go` - Event handling (keyboard input, file events, timers)
 - `internal/tui/view.go` - UI rendering with tabs for sessions/commands/patterns
 - `internal/tui/styles.go` - Lipgloss style definitions, Catppuccin theming
@@ -23,16 +25,29 @@ Configuration system with pattern-based tool grouping:
 - `GetToolGroup()` - Returns first matching group for a pattern
 - `ShouldExclude()` - Checks if a pattern should be hidden
 
+### internal/devagent
+
+Discovers devagent container environments for remote session monitoring:
+
+- `Discover()` - Runs `devagent list` CLI and returns `[]Environment`
+- `ParseOutput(data []byte)` - Parses JSON output from devagent list
+- `Environment` - Container name, project path, host-side projects dir, state
+- Finds the `/home/vscode/.claude` mount, strips `/host_mnt` prefix (macOS Docker), appends `/projects`
+- Containers without a `.claude` mount are skipped
+
 ### internal/session
 
 Session parsing and monitoring:
 
-- `Session` - Represents a Claude Code session with commands
+- `Session` - Represents a Claude Code session with commands; has `Origin` field (`"local"` or `"devagent:<container-name>"`)
 - `CommandEntry` - A single tool call with timestamp, tool name, and pattern
 - `CommandPattern` - Aggregated pattern with count and examples
 - `ParseSessionFile()` - Parses JSONL session files
 - `GenericInput` - Extracts display strings from any tool's JSON input
-- `Watcher` - fsnotify-based file watcher for live updates
+- `Watcher` - fsnotify-based file watcher for live updates; monitors multiple project directories
+- `NewWatcher(projectsDirs []string)` - Creates watcher for one or more project directories
+- `AddProjectsDir(dir string) bool` - Dynamically adds a directory to monitor
+- `SetOrigin(dir, label string)` - Associates an origin label with a projects directory
 
 ## Commands
 
@@ -50,6 +65,10 @@ Session parsing and monitoring:
 - `make run` - Run the application
 - `make test` - Run tests
 - `make lint` - Run golangci-lint
+
+### CLI Flags
+
+- `--follow-devagent` - Monitor sessions in devagent containers (discovers environments via `devagent list`)
 
 ## Development Workflow
 
@@ -109,8 +128,8 @@ tool_groups:
 
 ## Adding Features
 
-1. Add new state fields to `Model` in `model.go`
-2. Handle new key bindings or messages in `update.go`
+1. Add new state fields to `Model` in `model.go`; add new options to `ModelOptions` if configurable at startup
+2. Handle new key bindings or messages in `update.go` (app-level in `handleAppMsg`, keyboard in `handleKeyPress`)
 3. Update the `View()` function to render new state
 4. Add styles in `styles.go` as needed
 
@@ -127,3 +146,9 @@ Lists preserve scroll position during updates unless: session changes, initial l
 
 ### Per-Session Patterns
 The patterns view shows aggregated command patterns for the currently selected session only, not across all sessions.
+
+### Multi-Directory Watching
+The `Watcher` monitors multiple project directories simultaneously. Each directory has an origin label (e.g., `"local"`, `"devagent:container-name"`). Sessions inherit the origin of the directory they were discovered in. When `--follow-devagent` is enabled, devagent environments are re-discovered on each tick and new directories are added dynamically via `AddProjectsDir`.
+
+### Devagent Integration
+Devagent environments are discovered by running `devagent list` and parsing its JSON output. The host-side session path is derived from the container's `.claude` mount point. Sessions from devagent containers display a `[da]` tag in the session list. If devagent discovery fails, the app falls back to local-only monitoring.

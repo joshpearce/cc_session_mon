@@ -6,6 +6,7 @@ import (
 	"sort"
 	"time"
 
+	"cc_session_mon/internal/devagent"
 	"cc_session_mon/internal/session"
 
 	"github.com/charmbracelet/bubbles/list"
@@ -20,6 +21,11 @@ const (
 	ViewCommands                 // Command log for selected session
 	ViewPatterns                 // Unique patterns aggregation
 )
+
+// ModelOptions configures Model creation
+type ModelOptions struct {
+	FollowDevagent bool
+}
 
 // Model represents the application state
 type Model struct {
@@ -56,17 +62,56 @@ type Model struct {
 
 	// Error state
 	err error
+
+	// Devagent support
+	followDevagent bool
 }
 
 // NewModel creates a new Model with initialized state
-func NewModel() Model {
-	projectsDir := filepath.Join(os.Getenv("HOME"), ".claude", "projects")
-	watcher, err := session.NewWatcher(projectsDir)
+func NewModel(opts ModelOptions) Model {
+	var projectsDirs []string
+	var watcher *session.Watcher
+	var err error
 
 	// Create delegates
 	sessionDel := newSessionDelegate()
 	commandDel := newCommandDelegate()
 	patternDel := newPatternDelegate()
+
+	// Initialize based on devagent flag
+	if opts.FollowDevagent {
+		// Discover devagent environments and build projects dirs
+		envs, discoverErr := devagent.Discover()
+		if discoverErr != nil {
+			// Fall back to local if discovery fails
+			projectsDir := filepath.Join(os.Getenv("HOME"), ".claude", "projects")
+			projectsDirs = []string{projectsDir}
+			watcher, err = session.NewWatcher(projectsDirs)
+			if err == nil {
+				watcher.SetOrigin(projectsDir, "local")
+			}
+		} else {
+			// Build projects dirs from environments
+			for _, env := range envs {
+				projectsDirs = append(projectsDirs, env.ProjectsDir)
+			}
+			watcher, err = session.NewWatcher(projectsDirs)
+			if err == nil {
+				// Set origin labels for each environment
+				for _, env := range envs {
+					watcher.SetOrigin(env.ProjectsDir, "devagent:"+env.ContainerName)
+				}
+			}
+		}
+	} else {
+		// Local mode: use ~/.claude/projects
+		projectsDir := filepath.Join(os.Getenv("HOME"), ".claude", "projects")
+		projectsDirs = []string{projectsDir}
+		watcher, err = session.NewWatcher(projectsDirs)
+		if err == nil {
+			watcher.SetOrigin(projectsDir, "local")
+		}
+	}
 
 	m := Model{
 		watcher:         watcher,
@@ -76,6 +121,7 @@ func NewModel() Model {
 		sessionDelegate: sessionDel,
 		commandDelegate: commandDel,
 		patternDelegate: patternDel,
+		followDevagent:  opts.FollowDevagent,
 	}
 
 	// Initialize list components with delegates
@@ -119,6 +165,9 @@ type (
 	errMsg                struct{ error }    // General error
 	detailLoadedMsg       *session.ToolInput // Tool input loaded successfully
 	detailErrorMsg        struct{ error }    // Error loading tool input
+	devagentRefreshMsg    struct {
+		envs []devagent.Environment
+	}
 )
 
 // discoverSessionsCmd discovers existing sessions
@@ -155,6 +204,17 @@ func (m Model) tickCmd() tea.Cmd {
 	return tea.Tick(30*time.Second, func(t time.Time) tea.Msg {
 		return tickMsg(t)
 	})
+}
+
+// devagentRefreshCmd discovers devagent environments and returns a refresh message
+func (m Model) devagentRefreshCmd() tea.Cmd {
+	return func() tea.Msg {
+		envs, err := devagent.Discover()
+		if err != nil {
+			return errMsg{err}
+		}
+		return devagentRefreshMsg{envs: envs}
+	}
 }
 
 // loadDetailCmd asynchronously loads tool input for a command

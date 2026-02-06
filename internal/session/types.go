@@ -11,6 +11,7 @@ type Session struct {
 	LastActivity time.Time      // Timestamp of last command
 	Commands     []CommandEntry // All write operation commands
 	IsActive     bool           // True if file modified recently (within 5 minutes)
+	Origin       string         // "local" or "devagent:container-name"
 }
 
 // CommandEntry represents a single tool invocation
