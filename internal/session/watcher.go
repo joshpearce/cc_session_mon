@@ -122,9 +122,13 @@ func (w *Watcher) discoverInDir(projectsDir string) []*Session {
 					w.offsets[jsonlPath] = info.Size()
 				}
 
-				// Watch and track subagent files
+				// Watch session-ID subdirectory so we detect subagents/ creation
 				sessionID := strings.TrimSuffix(filepath.Base(jsonlPath), ".jsonl")
-				subagentDir := filepath.Join(projectDir, sessionID, "subagents")
+				sessionSubdir := filepath.Join(projectDir, sessionID)
+				_ = w.fsWatcher.Add(sessionSubdir)
+
+				// Watch and track subagent files
+				subagentDir := filepath.Join(sessionSubdir, "subagents")
 				if subagentFiles, err := filepath.Glob(filepath.Join(subagentDir, "*.jsonl")); err == nil {
 					for _, subPath := range subagentFiles {
 						w.subagentMap[subPath] = jsonlPath
@@ -504,6 +508,58 @@ func (w *Watcher) RefreshActivityStatus() {
 	for path, session := range w.sessions {
 		if info, err := os.Stat(path); err == nil {
 			session.IsActive = time.Since(info.ModTime()) < 5*time.Minute
+		}
+	}
+}
+
+// ScanForNewSubagents polls for subagent JSONL files that may have been missed
+// by fsnotify due to a race condition on macOS (kqueue). For each tracked session,
+// it globs for subagent files and picks up any not already in w.subagentMap.
+func (w *Watcher) ScanForNewSubagents() {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	for mainPath, sess := range w.sessions {
+		sessionID := strings.TrimSuffix(filepath.Base(mainPath), ".jsonl")
+		projectDir := filepath.Dir(mainPath)
+		subagentDir := filepath.Join(projectDir, sessionID, "subagents")
+
+		subagentFiles, err := filepath.Glob(filepath.Join(subagentDir, "*.jsonl"))
+		if err != nil || len(subagentFiles) == 0 {
+			continue
+		}
+
+		for _, subPath := range subagentFiles {
+			if _, tracked := w.subagentMap[subPath]; tracked {
+				continue
+			}
+
+			// New subagent file discovered by polling
+			w.subagentMap[subPath] = mainPath
+
+			commands, _, _ := ParseSessionFile(subPath)
+			if info, err := os.Stat(subPath); err == nil {
+				w.offsets[subPath] = info.Size()
+			}
+
+			// Ensure we're watching the subagents directory
+			_ = w.fsWatcher.Add(subagentDir)
+
+			if len(commands) > 0 {
+				sess.Commands = append(sess.Commands, commands...)
+				sess.LastActivity = time.Now()
+				sess.IsActive = true
+				w.invalidateSortedCache()
+
+				select {
+				case w.Events <- WatchEvent{
+					Type:     "new_commands",
+					Session:  sess,
+					Commands: commands,
+				}:
+				default:
+				}
+			}
 		}
 	}
 }

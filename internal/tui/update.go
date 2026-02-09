@@ -93,6 +93,7 @@ func (m Model) updateActiveList(msg tea.Msg) (Model, tea.Cmd) {
 func (m Model) handleTick() Model {
 	if m.watcher != nil {
 		m.watcher.RefreshActivityStatus()
+		m.watcher.ScanForNewSubagents()
 		m = m.updateSessionList()
 	}
 	return m
