@@ -65,7 +65,7 @@ func TestParseOutput(t *testing.T) {
       "mounts": [
         {
           "type": "bind",
-          "source": "/host_mnt/Users/josh/.local/share/devagent/claude-configs/abc123/.claude",
+          "source": "/Users/josh/code/my-project/.devcontainer/home/vscode/.claude",
           "destination": "/home/vscode/.claude",
           "read_only": false
         }
@@ -90,8 +90,8 @@ func TestParseOutput(t *testing.T) {
 				if env.ProjectPath != "/Users/josh/code/my-project" {
 					t.Errorf("expected project path '/Users/josh/code/my-project', got %q", env.ProjectPath)
 				}
-				if env.ProjectsDir != "/Users/josh/.local/share/devagent/claude-configs/abc123/projects" {
-					t.Errorf("expected projects dir '/Users/josh/.local/share/devagent/claude-configs/abc123/projects', got %q", env.ProjectsDir)
+				if env.ProjectsDir != "/Users/josh/code/my-project/.devcontainer/home/vscode/.claude/projects" {
+					t.Errorf("expected projects dir '/Users/josh/code/my-project/.devcontainer/home/vscode/.claude/projects', got %q", env.ProjectsDir)
 				}
 				if env.State != "running" {
 					t.Errorf("expected state 'running', got %q", env.State)
@@ -107,7 +107,7 @@ func TestParseOutput(t *testing.T) {
       "mounts": [
         {
           "type": "bind",
-          "source": "/host_mnt/Users/josh/.local/share/devagent/claude-configs/abc123/.claude",
+          "source": "/Users/josh/code/project1/.devcontainer/home/vscode/.claude",
           "destination": "/home/vscode/.claude",
           "read_only": false
         }
@@ -124,7 +124,7 @@ func TestParseOutput(t *testing.T) {
       "mounts": [
         {
           "type": "bind",
-          "source": "/host_mnt/Users/josh/.local/share/devagent/claude-configs/def456/.claude",
+          "source": "/Users/josh/code/project2/.devcontainer/home/vscode/.claude",
           "destination": "/home/vscode/.claude",
           "read_only": false
         }
@@ -156,7 +156,7 @@ func TestParseOutput(t *testing.T) {
       "mounts": [
         {
           "type": "bind",
-          "source": "/home/user/.local/share/devagent/claude-configs/xyz789/.claude",
+          "source": "/home/user/my-project/.devcontainer/home/vscode/.claude",
           "destination": "/home/vscode/.claude",
           "read_only": false
         }
@@ -172,8 +172,8 @@ func TestParseOutput(t *testing.T) {
 			wantErr: false,
 			validate: func(envs []Environment) {
 				env := envs[0]
-				if env.ProjectsDir != "/home/user/.local/share/devagent/claude-configs/xyz789/projects" {
-					t.Errorf("expected projects dir '/home/user/.local/share/devagent/claude-configs/xyz789/projects', got %q", env.ProjectsDir)
+				if env.ProjectsDir != "/home/user/my-project/.devcontainer/home/vscode/.claude/projects" {
+					t.Errorf("expected projects dir '/home/user/my-project/.devcontainer/home/vscode/.claude/projects', got %q", env.ProjectsDir)
 				}
 			},
 		},

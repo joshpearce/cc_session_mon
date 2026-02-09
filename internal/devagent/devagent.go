@@ -83,9 +83,9 @@ func ParseOutput(data []byte) ([]Environment, error) {
 			continue
 		}
 
-		// Strip /host_mnt prefix and append /projects
+		// Derive host-side projects dir from mount source
 		basePath := stripHostMntPrefix(claudeMount.Source)
-		projectsDir := strings.TrimSuffix(basePath, "/.claude") + "/projects"
+		projectsDir := basePath + "/projects"
 
 		envs = append(envs, Environment{
 			ContainerName: container.ProxySidecar.ContainerName,
