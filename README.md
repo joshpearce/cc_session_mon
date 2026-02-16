@@ -2,6 +2,8 @@
 
 A terminal user interface for monitoring Claude Code sessions in real-time. Built with [Bubbletea](https://github.com/charmbracelet/bubbletea), [Bubbles](https://github.com/charmbracelet/bubbles), and [Lipgloss](https://github.com/charmbracelet/lipgloss).
 
+![cc_session_mon screenshot](assets/screenshot.png)
+
 ## Features
 
 - **Live Session Monitoring**: Watches `~/.claude/projects/` for active Claude Code sessions
@@ -66,7 +68,7 @@ make run
 
 ## Configuration
 
-Create a config file at `~/.config/cc_session_mon/config.yaml`:
+Copy the included `config.yaml` to `~/.config/cc_session_mon/config.yaml`:
 
 ```yaml
 # Catppuccin theme: mocha, macchiato, frappe, latte
