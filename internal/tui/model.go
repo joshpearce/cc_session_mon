@@ -4,12 +4,14 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 
 	"cc_session_mon/internal/devagent"
 	"cc_session_mon/internal/session"
 
 	"github.com/charmbracelet/bubbles/list"
+	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 )
 
@@ -55,6 +57,15 @@ type Model struct {
 	loadedInput     *session.ToolInput    // Lazily loaded input data
 	loadingDetail   bool                  // Loading state indicator
 	detailError     error                 // Error from loading details
+
+	// Path dialog state
+	showPathDialog bool // Whether the session path dialog is visible
+
+	// Search state
+	searchActive    bool            // Whether search bar is visible
+	searchFocused   bool            // Whether search input has keyboard focus
+	searchInput     textinput.Model // Text input component
+	allCommandItems []list.Item     // Unfiltered command items for active session
 
 	// UI dimensions
 	width  int
@@ -123,6 +134,12 @@ func NewModel(opts ModelOptions) Model {
 		patternDelegate: patternDel,
 		followDevagent:  opts.FollowDevagent,
 	}
+
+	// Initialize search input
+	m.searchInput = textinput.New()
+	m.searchInput.Placeholder = "search commands..."
+	m.searchInput.Prompt = "/ "
+	m.searchInput.CharLimit = 200
 
 	// Initialize list components with delegates
 	m.sessionList = list.New([]list.Item{}, sessionDel, 0, 0)
@@ -241,6 +258,7 @@ func (m Model) updateSessionList() Model {
 // updateCommandList rebuilds the command list for the active session
 func (m Model) updateCommandList() Model {
 	if m.activeIdx >= len(m.sessions) || len(m.sessions) == 0 {
+		m.allCommandItems = nil
 		m.commandList.SetItems([]list.Item{})
 		return m
 	}
@@ -265,7 +283,11 @@ func (m Model) updateCommandList() Model {
 	for i, idx := range indices {
 		items[i] = commandItem{command: sess.Commands[idx]}
 	}
-	m.commandList.SetItems(items)
+
+	// Store unfiltered items and apply search filter
+	m.allCommandItems = items
+	m = m.applySearchFilter()
+
 	m.commandList.Title = "Commands - " + filepath.Base(sess.ProjectPath)
 
 	// Only auto-scroll to top if user was already at top, or this is initial load
@@ -273,6 +295,26 @@ func (m Model) updateCommandList() Model {
 		m.commandList.Select(0)
 	}
 
+	return m
+}
+
+// applySearchFilter filters allCommandItems by search text and sets commandList items.
+func (m Model) applySearchFilter() Model {
+	if !m.searchActive || m.searchInput.Value() == "" {
+		m.commandList.SetItems(m.allCommandItems)
+		return m
+	}
+
+	text := strings.ToLower(m.searchInput.Value())
+	filtered := make([]list.Item, 0, len(m.allCommandItems))
+	for _, item := range m.allCommandItems {
+		if ci, ok := item.(commandItem); ok {
+			if strings.Contains(strings.ToLower(ci.command.RawCommand), text) {
+				filtered = append(filtered, item)
+			}
+		}
+	}
+	m.commandList.SetItems(filtered)
 	return m
 }
 
@@ -365,6 +407,15 @@ func (m Model) updateListSizes() Model {
 		listWidth = 20
 	}
 
+	// Command list height is reduced when search bar is active
+	commandListHeight := listHeight
+	if m.searchActive {
+		commandListHeight -= 2 // 1 for search input, 1 for spacing
+		if commandListHeight < 3 {
+			commandListHeight = 3
+		}
+	}
+
 	// Command list width is reduced when detail panel is open
 	commandListWidth := listWidth
 	if m.viewMode == ViewCommands && m.detailPanelOpen {
@@ -377,7 +428,7 @@ func (m Model) updateListSizes() Model {
 	m.patternDelegate.SetWidth(listWidth)
 
 	m.sessionList.SetSize(listWidth, listHeight)
-	m.commandList.SetSize(commandListWidth, listHeight)
+	m.commandList.SetSize(commandListWidth, commandListHeight)
 	m.patternList.SetSize(listWidth, listHeight)
 
 	return m
