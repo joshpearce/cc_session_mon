@@ -210,6 +210,13 @@ func HelpStyle() lipgloss.Style {
 		Foreground(t.Muted)
 }
 
+// SearchBarStyle returns style for the search bar container
+func SearchBarStyle() lipgloss.Style {
+	t := GetTheme()
+	return lipgloss.NewStyle().
+		Foreground(t.Muted)
+}
+
 func ColumnHeaderStyle(width int) lipgloss.Style {
 	t := GetTheme()
 	return lipgloss.NewStyle().

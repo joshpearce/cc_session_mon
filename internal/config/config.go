@@ -103,7 +103,8 @@ func DefaultConfig() *Config {
 func Load(path string) (*Config, error) {
 	cfg := DefaultConfig()
 
-	data, err := os.ReadFile(path)
+	cleanPath := filepath.Clean(path)
+	data, err := os.ReadFile(cleanPath) //nolint:gosec // config path from known locations
 	if err != nil {
 		if os.IsNotExist(err) {
 			return cfg, nil // Use defaults if no config file
@@ -131,8 +132,9 @@ func LoadFromDefaultPath() (*Config, error) {
 	}
 
 	for _, path := range paths {
-		if _, err := os.Stat(path); err == nil {
-			return Load(path)
+		cleanPath := filepath.Clean(path)
+		if _, err := os.Stat(cleanPath); err == nil { //nolint:gosec // config path from known locations
+			return Load(cleanPath)
 		}
 	}
 

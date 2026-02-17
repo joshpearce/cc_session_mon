@@ -36,12 +36,15 @@ func (m Model) View() string {
 		b.WriteString(m.sessionList.View())
 	case ViewCommands:
 		if m.detailPanelOpen {
-			// Split view: list on left (60%), detail panel on right (40%)
 			b.WriteString(m.renderSplitCommandView())
 		} else {
 			b.WriteString(m.renderCommandHeaders())
 			b.WriteString("\n")
 			b.WriteString(m.commandList.View())
+		}
+		if m.searchActive {
+			b.WriteString("\n")
+			b.WriteString(m.renderSearchBar())
 		}
 	case ViewPatterns:
 		b.WriteString(m.renderPatternHeaders())
@@ -52,6 +55,11 @@ func (m Model) View() string {
 	// Help footer
 	b.WriteString("\n")
 	b.WriteString(m.renderHelp())
+
+	// Overlay path dialog if active
+	if m.showPathDialog {
+		return m.overlayPathDialog(b.String())
+	}
 
 	return b.String()
 }
@@ -150,24 +158,38 @@ func (m Model) renderHelp() string {
 			"enter:select",
 			"tab:next session",
 			"h/l:switch view",
+			"p:path",
 			"r:refresh",
 			"q:quit",
 		}
 	case ViewCommands:
-		if m.detailPanelOpen {
+		switch {
+		case m.searchActive && m.searchFocused:
+			help = []string{
+				"type to filter",
+				"esc:unfocus",
+				"tab:next session",
+				"ctrl+f:close",
+				"ctrl+c:quit",
+			}
+		case m.detailPanelOpen:
 			help = []string{
 				"j/k:navigate",
 				"enter:close panel",
 				"esc:close panel",
 				"tab:next session",
+				"ctrl+f:search",
+				"p:path",
 				"q:quit",
 			}
-		} else {
+		default:
 			help = []string{
 				"j/k:navigate",
 				"enter:show details",
 				"tab:next session",
 				"h/l:switch view",
+				"ctrl+f:search",
+				"p:path",
 				"esc:back",
 				"q:quit",
 			}
@@ -182,6 +204,11 @@ func (m Model) renderHelp() string {
 	}
 
 	return HelpStyle().Render(strings.Join(help, " | "))
+}
+
+// renderSearchBar renders the search input at the bottom of the Commands tab
+func (m Model) renderSearchBar() string {
+	return SearchBarStyle().Render(m.searchInput.View())
 }
 
 // renderSessionHeaders renders column headers for the session list
@@ -231,6 +258,114 @@ func padLeft(s string, width int) string {
 	return strings.Repeat(" ", width-len(s)) + s
 }
 
+// overlayPathDialog renders the path dialog centered over the existing view
+func (m Model) overlayPathDialog(background string) string {
+	sess := m.ActiveSession()
+	if sess == nil {
+		return background
+	}
+
+	sessionDir := filepath.Dir(sess.FilePath)
+
+	// Build dialog content
+	t := GetTheme()
+
+	pathLabel := LabelStyle().Render("Session data path:")
+	pathValue := lipgloss.NewStyle().Foreground(t.Secondary).Render(sessionDir)
+
+	grepLabel := LabelStyle().Render("Search example:")
+	grepCmd := lipgloss.NewStyle().Foreground(t.Text).
+		Background(t.Surface).
+		Padding(0, 1).
+		Render(fmt.Sprintf("grep -ri 'search_term' %s", sessionDir))
+
+	dismiss := lipgloss.NewStyle().Foreground(t.Muted).Italic(true).Render("Press any key to dismiss")
+
+	content := lipgloss.JoinVertical(lipgloss.Left,
+		pathLabel,
+		pathValue,
+		"",
+		grepLabel,
+		grepCmd,
+		"",
+		dismiss,
+	)
+
+	// Build bordered dialog box
+	dialogWidth := min(m.width-8, lipgloss.Width(grepCmd)+6)
+	if dialogWidth < 40 {
+		dialogWidth = 40
+	}
+
+	dialog := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(t.Primary).
+		Padding(1, 2).
+		Width(dialogWidth).
+		Render(content)
+
+	// Center the dialog on screen
+	dialogHeight := lipgloss.Height(dialog)
+	dialogW := lipgloss.Width(dialog)
+
+	// Split background into lines and overlay
+	bgLines := strings.Split(background, "\n")
+	startRow := (m.height - dialogHeight) / 2
+	startCol := (m.width - dialogW) / 2
+	if startRow < 0 {
+		startRow = 0
+	}
+	if startCol < 0 {
+		startCol = 0
+	}
+
+	dialogLines := strings.Split(dialog, "\n")
+	for i, dLine := range dialogLines {
+		row := startRow + i
+		if row >= len(bgLines) {
+			break
+		}
+		bgLine := bgLines[row]
+		// Pad background line if needed
+		bgW := lipgloss.Width(bgLine)
+		if bgW < startCol+lipgloss.Width(dLine) {
+			bgLine += strings.Repeat(" ", startCol+lipgloss.Width(dLine)-bgW)
+		}
+		// Replace the portion of the background line with dialog line
+		bgLines[row] = placeover(bgLine, dLine, startCol)
+	}
+
+	return strings.Join(bgLines, "\n")
+}
+
+// placeover places overlay text at a given column position in a line
+func placeover(bg, overlay string, col int) string {
+	// Use lipgloss.PlaceHorizontal for ANSI-aware placement
+	bgWidth := lipgloss.Width(bg)
+	overlayWidth := lipgloss.Width(overlay)
+	totalWidth := col + overlayWidth
+	if totalWidth < bgWidth {
+		totalWidth = bgWidth
+	}
+
+	// Build: left padding + overlay + right portion
+	left := ""
+	if col > 0 {
+		// Take first col characters from background
+		left = truncateAnsi(bg, col)
+	}
+
+	return left + overlay + strings.Repeat(" ", max(0, totalWidth-col-overlayWidth))
+}
+
+// truncateAnsi truncates a string to a display width, preserving ANSI sequences
+func truncateAnsi(s string, width int) string {
+	// Use lipgloss.PlaceHorizontal to get a fixed-width string, then take what we need
+	return lipgloss.NewStyle().Width(width).MaxWidth(width).Render(
+		lipgloss.NewStyle().Inline(true).MaxWidth(width).Render(s),
+	)
+}
+
 // renderSplitCommandView renders the commands list with detail panel side-by-side
 func (m Model) renderSplitCommandView() string {
 	// Calculate widths: 60% for list, 40% for detail (minus separator)
@@ -242,6 +377,13 @@ func (m Model) renderSplitCommandView() string {
 	contentHeight := m.height - 9
 	if contentHeight < 5 {
 		contentHeight = 5
+	}
+	// Reduce height when search bar is active
+	if m.searchActive {
+		contentHeight -= 2
+		if contentHeight < 3 {
+			contentHeight = 3
+		}
 	}
 
 	// Build the list side with headers

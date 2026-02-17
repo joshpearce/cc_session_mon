@@ -102,7 +102,7 @@ func formatBashDetail(input *session.ToolInput, width int) string {
 	// Metadata
 	if timeout > 0 {
 		b.WriteString(LabelStyle().Render("Timeout: "))
-		b.WriteString(fmt.Sprintf("%.0fms", timeout))
+		fmt.Fprintf(&b, "%.0fms", timeout)
 		b.WriteString("\n")
 	}
 
@@ -285,7 +285,7 @@ func formatWriteDetail(input *session.ToolInput, width int) string {
 	b.WriteString("\n\n")
 
 	b.WriteString(LabelStyle().Render("Content:"))
-	b.WriteString(fmt.Sprintf(" (%d bytes)", len(content)))
+	fmt.Fprintf(&b, " (%d bytes)", len(content))
 	b.WriteString("\n")
 	b.WriteString(CodeBlockStyle(width).Render(truncateMultiline(content, width-4, 10)))
 	b.WriteString("\n")
@@ -319,10 +319,10 @@ func formatReadDetail(input *session.ToolInput, width int) string {
 		b.WriteString(LabelStyle().Render("Range:"))
 		b.WriteString("\n")
 		if offset > 0 {
-			b.WriteString(fmt.Sprintf("  Offset: %.0f\n", offset))
+			fmt.Fprintf(&b, "  Offset: %.0f\n", offset)
 		}
 		if limit > 0 {
-			b.WriteString(fmt.Sprintf("  Limit: %.0f lines\n", limit))
+			fmt.Fprintf(&b, "  Limit: %.0f lines\n", limit)
 		}
 	}
 
@@ -497,7 +497,7 @@ func formatGenericDetail(input *session.ToolInput, width int) string {
 			if len(valueStr) > width-4 {
 				valueStr = valueStr[:width-7] + "..."
 			}
-			b.WriteString(fmt.Sprintf("  %s: %s\n", key, valueStr))
+			fmt.Fprintf(&b, "  %s: %s\n", key, valueStr)
 		}
 	}
 

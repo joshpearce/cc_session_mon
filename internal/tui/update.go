@@ -103,12 +103,28 @@ func (m Model) handleTick() Model {
 func (m Model) handleKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	key := msg.String()
 
+	// Dismiss path dialog on any key
+	if m.showPathDialog {
+		m.showPathDialog = false
+		return m, nil
+	}
+
+	// When search is focused, route most keys to the text input
+	if m.searchActive && m.searchFocused {
+		return m.handleSearchFocusedKey(msg)
+	}
+
 	// Global keys (always handled)
 	switch key {
 	case "ctrl+c", "q":
 		return m, tea.Quit
 	case "r":
 		return m, m.discoverSessionsCmd()
+	case "ctrl+f":
+		// Toggle search (only on Commands tab)
+		if m.viewMode == ViewCommands {
+			return m.handleCtrlF()
+		}
 	}
 
 	// Session navigation keys
@@ -126,8 +142,11 @@ func (m Model) handleKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return newModel, cmd
 	}
 
-	// Number keys for direct view access
+	// Number keys, path dialog
 	if newModel, handled := m.handleNumberKeys(key); handled {
+		return newModel, nil
+	}
+	if newModel, handled := m.handlePathDialog(key); handled {
 		return newModel, nil
 	}
 
@@ -341,6 +360,96 @@ func (m Model) handleListNavigation(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.patternList, cmd = m.patternList.Update(msg)
 	}
 
+	return m, cmd
+}
+
+// handlePathDialog handles the 'p' key to show session path dialog
+func (m Model) handlePathDialog(key string) (Model, bool) {
+	if key == "p" && (m.viewMode == ViewSessions || m.viewMode == ViewCommands) {
+		if m.ActiveSession() != nil {
+			m.showPathDialog = true
+			return m, true
+		}
+	}
+	return m, false
+}
+
+// handleCtrlF implements the Ctrl+F three-state toggle for search.
+// Hidden → Focused, Focused → Hidden (clear), Unfocused → Focused.
+func (m Model) handleCtrlF() (tea.Model, tea.Cmd) {
+	switch {
+	case !m.searchActive:
+		// Hidden → open and focus
+		m.searchActive = true
+		m.searchFocused = true
+		cmd := m.searchInput.Focus()
+		m = m.updateListSizes()
+		return m, cmd
+
+	case m.searchFocused:
+		// Focused → close and clear
+		m.searchActive = false
+		m.searchFocused = false
+		m.searchInput.SetValue("")
+		m.searchInput.Blur()
+		m = m.applySearchFilter() // restores full list
+		m = m.updateListSizes()
+		return m, nil
+
+	default:
+		// Unfocused → re-focus
+		m.searchFocused = true
+		cmd := m.searchInput.Focus()
+		return m, cmd
+	}
+}
+
+// handleSearchFocusedKey routes keys when search input is focused.
+func (m Model) handleSearchFocusedKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	key := msg.String()
+
+	switch key {
+	case "ctrl+c":
+		return m, tea.Quit
+
+	case "ctrl+f":
+		// Close search
+		return m.handleCtrlF()
+
+	case "esc":
+		// Unfocus but keep filter active
+		m.searchFocused = false
+		m.searchInput.Blur()
+		return m, nil
+
+	case "tab":
+		// Cycle session forward + unfocus
+		m.searchFocused = false
+		m.searchInput.Blur()
+		if len(m.sessions) > 0 {
+			m.activeIdx = (m.activeIdx + 1) % len(m.sessions)
+			m = m.updateCommandList()
+			m = m.aggregatePatterns()
+		}
+		return m, nil
+
+	case "shift+tab":
+		// Cycle session backward + unfocus
+		m.searchFocused = false
+		m.searchInput.Blur()
+		if len(m.sessions) > 0 {
+			m.activeIdx = (m.activeIdx - 1 + len(m.sessions)) % len(m.sessions)
+			m = m.updateCommandList()
+			m = m.aggregatePatterns()
+		}
+		return m, nil
+	}
+
+	// All other keys go to the text input
+	var cmd tea.Cmd
+	m.searchInput, cmd = m.searchInput.Update(msg)
+	// Re-apply filter after each keystroke
+	m = m.applySearchFilter()
 	return m, cmd
 }
 
