@@ -17,7 +17,8 @@ help:
 all: deps build
 
 deps:
-	go mod tidy
+	go mod download
+	go mod verify
 
 build:
 	go build -o bin/$(NAME) .
@@ -29,7 +30,7 @@ test:
 	go test -v ./...
 
 lint:
-	go tool golangci-lint run
+	golangci-lint run
 
 clean:
 	rm -rf bin/

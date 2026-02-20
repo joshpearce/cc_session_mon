@@ -3,7 +3,7 @@ pre-commit:
   commands:
     golangci-lint:
       glob: "*.go"
-      run: go tool golangci-lint run --new-from-rev=HEAD
+      run: golangci-lint run --new-from-rev=HEAD
     go-mod-tidy:
       glob: "*.go"
       run: go mod tidy && git diff --exit-code go.mod go.sum
