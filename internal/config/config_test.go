@@ -218,6 +218,153 @@ func TestLoadMissingFile(t *testing.T) {
 	}
 }
 
+func TestDefaultConfigAlertRules(t *testing.T) {
+	cfg := DefaultConfig()
+
+	// Exactly one alert rule ships by default.
+	if len(cfg.Alerts) != 1 {
+		t.Fatalf("DefaultConfig() should have exactly 1 alert rule, got %d", len(cfg.Alerts))
+	}
+
+	rule := cfg.Alerts[0]
+	if rule.Metric != "active_subagents" {
+		t.Errorf("default alert rule Metric = %q, want %q", rule.Metric, "active_subagents")
+	}
+	if rule.AlertThreshold != 20 {
+		t.Errorf("default alert rule AlertThreshold = %v, want 20", rule.AlertThreshold)
+	}
+	if rule.ActionThreshold != 40 {
+		t.Errorf("default alert rule ActionThreshold = %v, want 40", rule.ActionThreshold)
+	}
+	if rule.ActionSustainedTicks != 1 {
+		t.Errorf("default alert rule ActionSustainedTicks = %v, want 1", rule.ActionSustainedTicks)
+	}
+
+	// Corrective actions are opt-in and must be off by default.
+	if cfg.EnableCorrectiveActions {
+		t.Error("DefaultConfig() EnableCorrectiveActions should be false")
+	}
+	if cfg.ActionDryRun {
+		t.Error("DefaultConfig() ActionDryRun should be false")
+	}
+
+	// Action-path defaults must be non-empty.
+	if cfg.DevcontainerFilterRelPath != "proxy/filter.py" {
+		t.Errorf("DevcontainerFilterRelPath = %q, want %q", cfg.DevcontainerFilterRelPath, "proxy/filter.py")
+	}
+	if cfg.AnthropicAllowPattern == "" {
+		t.Error("AnthropicAllowPattern should be non-empty")
+	}
+}
+
+func TestLoadOmittedAlertsKeepsDefaults(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.yaml")
+
+	// Write a config file that sets only theme — no alerts key at all.
+	content := "theme: mocha\n"
+	if err := os.WriteFile(configPath, []byte(content), 0o644); err != nil {
+		t.Fatalf("Failed to write test config: %v", err)
+	}
+
+	cfg, err := Load(configPath)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	// The default active_subagents rule must survive.
+	if len(cfg.Alerts) != 1 {
+		t.Fatalf("Load() with no alerts key should keep 1 default rule, got %d", len(cfg.Alerts))
+	}
+	rule := cfg.Alerts[0]
+	if rule.Metric != "active_subagents" {
+		t.Errorf("surviving rule Metric = %q, want %q", rule.Metric, "active_subagents")
+	}
+	if rule.AlertThreshold != 20 {
+		t.Errorf("surviving rule AlertThreshold = %v, want 20", rule.AlertThreshold)
+	}
+	if rule.ActionThreshold != 40 {
+		t.Errorf("surviving rule ActionThreshold = %v, want 40", rule.ActionThreshold)
+	}
+	if rule.ActionSustainedTicks != 1 {
+		t.Errorf("surviving rule ActionSustainedTicks = %v, want 1", rule.ActionSustainedTicks)
+	}
+
+	// Action flags still off.
+	if cfg.EnableCorrectiveActions {
+		t.Error("EnableCorrectiveActions should remain false when omitted from YAML")
+	}
+	if cfg.ActionDryRun {
+		t.Error("ActionDryRun should remain false when omitted from YAML")
+	}
+}
+
+func TestLoadMultiRuleYAMLRoundTrip(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.yaml")
+
+	content := `theme: mocha
+enable_corrective_actions: true
+action_dry_run: true
+alerts:
+  - metric: active_subagents
+    alert_threshold: 20
+    action_threshold: 40
+    action_sustained_ticks: 1
+  - metric: tokens_per_min_1m
+    alert_threshold: 50000
+    action_threshold: 120000
+    action_sustained_ticks: 3
+`
+	if err := os.WriteFile(configPath, []byte(content), 0o644); err != nil {
+		t.Fatalf("Failed to write test config: %v", err)
+	}
+
+	cfg, err := Load(configPath)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	// The YAML alerts slice replaces the default single-rule slice.
+	if len(cfg.Alerts) != 2 {
+		t.Fatalf("Load() with 2 alert rules should have 2 rules, got %d", len(cfg.Alerts))
+	}
+
+	type wantRule struct {
+		metric               string
+		alertThreshold       float64
+		actionThreshold      float64
+		actionSustainedTicks int
+	}
+	wants := []wantRule{
+		{"active_subagents", 20, 40, 1},
+		{"tokens_per_min_1m", 50000, 120000, 3},
+	}
+
+	for i, w := range wants {
+		r := cfg.Alerts[i]
+		if r.Metric != w.metric {
+			t.Errorf("Alerts[%d].Metric = %q, want %q", i, r.Metric, w.metric)
+		}
+		if r.AlertThreshold != w.alertThreshold {
+			t.Errorf("Alerts[%d].AlertThreshold = %v, want %v", i, r.AlertThreshold, w.alertThreshold)
+		}
+		if r.ActionThreshold != w.actionThreshold {
+			t.Errorf("Alerts[%d].ActionThreshold = %v, want %v", i, r.ActionThreshold, w.actionThreshold)
+		}
+		if r.ActionSustainedTicks != w.actionSustainedTicks {
+			t.Errorf("Alerts[%d].ActionSustainedTicks = %v, want %v", i, r.ActionSustainedTicks, w.actionSustainedTicks)
+		}
+	}
+
+	if !cfg.EnableCorrectiveActions {
+		t.Error("EnableCorrectiveActions should be true when set in YAML")
+	}
+	if !cfg.ActionDryRun {
+		t.Error("ActionDryRun should be true when set in YAML")
+	}
+}
+
 func TestSetGlobal(t *testing.T) {
 	custom := &Config{
 		Theme: "custom",
