@@ -2,12 +2,15 @@ package session
 
 import (
 	"errors"
+	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
 
 	"cc_session_mon/internal/config"
+	"cc_session_mon/internal/discovery"
 )
 
 // ActionOutcome is the recorded result of a neutralization attempt.
@@ -56,14 +59,13 @@ var runPkill = func(pattern string) (matched bool, err error) {
 }
 
 // NeutralizeSession dispatches the corrective action by origin: local sessions
-// are killed with pkill; devcontainer sessions get the filter.py cut (Step 5 —
-// here a logged placeholder). dryRun returns the intended action without
-// executing it.
-func NeutralizeSession(sess *Session, _ *config.Config, dryRun bool) ActionOutcome {
+// are killed with pkill; devcontainer sessions get the filter.py cut.
+// dryRun returns the intended action without executing it.
+func NeutralizeSession(sess *Session, cfg *config.Config, dryRun bool) ActionOutcome {
 	if isLocalOrigin(sess.Origin) {
 		return killLocal(sess, dryRun)
 	}
-	return cutDevcontainer(sess, dryRun)
+	return cutDevcontainer(sess, cfg, dryRun)
 }
 
 func killLocal(sess *Session, dryRun bool) ActionOutcome {
@@ -84,8 +86,130 @@ func killLocal(sess *Session, dryRun bool) ActionOutcome {
 	}
 }
 
-// cutDevcontainer is implemented in Step 5; here it only records intent so the
-// dispatch path and audit wiring are exercised end-to-end.
-func cutDevcontainer(sess *Session, _ bool) ActionOutcome {
-	return ActionOutcome{Action: "skipped", Detail: "devcontainer cut not yet implemented (origin " + sess.Origin + ")"}
+// cutDevcontainer comments every uncommented line in the devcontainer proxy's
+// filter.py that matches cfg.AnthropicAllowPattern. The filter file's path is
+// derived from the monitor-discovered directory tree (FilePath anchor +
+// DevcontainerFilterRelPath) and is verified to stay under the anchor before
+// the file is read or written. The write is atomic (temp + os.Rename). The cut
+// is idempotent: already-commented matching lines are left untouched.
+func cutDevcontainer(sess *Session, cfg *config.Config, dryRun bool) ActionOutcome {
+	anchor, ok := discovery.DevcontainerAnchor(sess.FilePath)
+	if !ok {
+		return ActionOutcome{
+			Action: "failed",
+			Detail: "no .devcontainer anchor for " + sess.FilePath,
+		}
+	}
+
+	filterPath := filepath.Join(anchor, cfg.DevcontainerFilterRelPath)
+
+	// Reject traversal: the joined path must remain under the anchor.
+	if !IsTrustedPath(filterPath, []string{anchor}) {
+		return ActionOutcome{
+			Action: "failed",
+			Detail: "filter path escapes anchor: " + filterPath,
+		}
+	}
+
+	re, err := regexp.Compile(cfg.AnthropicAllowPattern)
+	if err != nil {
+		return ActionOutcome{
+			Action: "failed",
+			Detail: "bad AnthropicAllowPattern: " + err.Error(),
+		}
+	}
+
+	data, err := os.ReadFile(filterPath) //nolint:gosec // path is anchor-verified above
+	if err != nil {
+		return ActionOutcome{
+			Action: "failed",
+			Detail: "read filter.py: " + err.Error(),
+		}
+	}
+
+	lines := strings.Split(string(data), "\n")
+	changed, firstOriginal := applyFilterCut(lines, re)
+
+	if dryRun {
+		return ActionOutcome{
+			Action: "dry-run",
+			Detail: fmt.Sprintf("would comment %d line(s) in %s", changed, filterPath),
+		}
+	}
+
+	if changed == 0 {
+		return ActionOutcome{
+			Action: "filter-cut",
+			Detail: "no uncommented allow-rule lines in " + filterPath,
+		}
+	}
+
+	if err := atomicWrite(filterPath, strings.Join(lines, "\n")); err != nil {
+		return ActionOutcome{
+			Action: "failed",
+			Detail: "write filter.py: " + err.Error(),
+		}
+	}
+
+	return ActionOutcome{
+		Action: "filter-cut",
+		Detail: fmt.Sprintf("commented %d line(s) in %s; first: %s", changed, filterPath, firstOriginal),
+	}
+}
+
+// applyFilterCut iterates lines in-place, prefix-commenting each uncommented
+// line that matches re. It returns the count of lines changed and the text of
+// the first original line that was changed (empty string when count is 0).
+func applyFilterCut(lines []string, re *regexp.Regexp) (changed int, firstOriginal string) {
+	for i, line := range lines {
+		if !re.MatchString(line) {
+			continue
+		}
+		// Already commented — idempotent, leave untouched.
+		if strings.HasPrefix(strings.TrimLeft(line, " \t"), "#") {
+			continue
+		}
+		if changed == 0 {
+			firstOriginal = line
+		}
+		lines[i] = "# " + line
+		changed++
+	}
+	return changed, firstOriginal
+}
+
+// atomicWrite writes content to path via a temp file in the same directory,
+// preserving the original file's mode. The temp file is renamed over path only
+// on success; on any earlier error the temp file is removed.
+func atomicWrite(path, content string) error {
+	info, err := os.Stat(path)
+	if err != nil {
+		return fmt.Errorf("stat %s: %w", path, err)
+	}
+	mode := info.Mode()
+
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".filter-cut-*.tmp")
+	if err != nil {
+		return fmt.Errorf("create temp: %w", err)
+	}
+	tmpName := tmp.Name()
+
+	if _, err := tmp.WriteString(content); err != nil {
+		_ = tmp.Close()
+		_ = os.Remove(tmpName)
+		return fmt.Errorf("write temp: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		_ = os.Remove(tmpName)
+		return fmt.Errorf("close temp: %w", err)
+	}
+	if err := os.Chmod(tmpName, mode); err != nil {
+		_ = os.Remove(tmpName)
+		return fmt.Errorf("chmod temp: %w", err)
+	}
+	if err := os.Rename(tmpName, path); err != nil {
+		_ = os.Remove(tmpName)
+		return fmt.Errorf("rename temp to %s: %w", path, err)
+	}
+	return nil
 }

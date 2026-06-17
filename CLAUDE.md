@@ -39,6 +39,7 @@ Locates Claude `projects` directories to watch:
 - `FindProjectsDirs(roots []string)` - Recursively scans each search root for `.claude/projects` directories, returning `[]ProjectsDir{Path, Label}`; recursion is capped at `maxSearchDepth`, missing/unreadable roots are skipped, results are deduped by path
 - `ProjectsDir` - A discovered projects dir plus a short origin label
 - `deriveLabel()` - Pure helper that derives a label from a `.claude` path; for devcontainer layouts (`<repo>/.devcontainer/containers/<name>/...`) it yields `<repo>/<name>`, otherwise it falls back to the parent dir name
+- `DevcontainerAnchor(p string) (string, bool)` - Walks ancestors of `p` to find the nearest `.devcontainer` directory; returns its path and true if found. Used as the trust boundary for `cutDevcontainer`: the filter file must resolve under this anchor.
 
 ### internal/session
 
@@ -62,6 +63,12 @@ Session parsing and monitoring:
 - `AgentNode` - One spawned subagent's id and `[FirstSeen, LastSeen]` activity span (no parent link; nesting depth isn't recoverable from on-disk transcripts)
 - `AgentMetrics` / `ComputeAgentMetrics(nodes)` - `TotalAgents` (lifetime), `MaxConcurrent` (peak overlapping spans via sweep line — "how parallel did it ever get"), and per-agent `LastSeen`; `ActiveWithin(now, window)` counts agents last active within `window` of the wall clock so the "active" figure decays to 0 when a session goes quiet
 - `ScanSubtree(mainPath)` - Reads the main file plus every `subagents/agent-*.jsonl` once each, returning merged `[]UsageEntry` (burn rate) and one `AgentNode` per subagent file (agent counts); the sole reader of the subtree
+
+#### Corrective actions (action.go)
+
+- `NeutralizeSession(sess, cfg, dryRun)` - Dispatches by origin: local → `killLocal` (pkill -f), devcontainer → `cutDevcontainer`.
+- `IsTrustedPath(filePath, roots)` - Reports whether `filePath` is equal to or under one of the watched project roots; used as a gate before any action fires.
+- `cutDevcontainer` - Walks `sess.FilePath` up to its `.devcontainer` anchor via `discovery.DevcontainerAnchor`, joins `cfg.DevcontainerFilterRelPath`, verifies the result stays under the anchor (rejects `..` traversal), then prefix-comments (`# `) every uncommented line matching `cfg.AnthropicAllowPattern` in the proxy `filter.py`. Write is atomic (temp file + `os.Rename`), idempotent (already-commented matching lines are left untouched), and has no rollback — the cut persists until hand-edited.
 
 ## Commands
 

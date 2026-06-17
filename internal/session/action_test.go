@@ -3,6 +3,7 @@ package session
 import (
 	"errors"
 	"regexp"
+	"strings"
 	"testing"
 
 	"cc_session_mon/internal/config"
@@ -183,7 +184,8 @@ func TestNeutralizeSession_PkillError(t *testing.T) {
 }
 
 // TestNeutralizeSession_NonLocalOrigin verifies that a non-local origin routes
-// to the devcontainer placeholder ("skipped") and never calls runPkill.
+// to cutDevcontainer (not pkill). When FilePath has no .devcontainer ancestor,
+// the outcome is Action=="failed" with a "no .devcontainer anchor" detail.
 func TestNeutralizeSession_NonLocalOrigin(t *testing.T) {
 	// No t.Parallel(): mutates package-global runPkill.
 	called := false
@@ -196,13 +198,20 @@ func TestNeutralizeSession_NonLocalOrigin(t *testing.T) {
 
 	sess := &Session{
 		Origin:      "repo/app",
+		FilePath:    "/containers/repo/app/project/session.jsonl", // no .devcontainer in path
 		ProjectPath: "/containers/repo/app/project",
 	}
-	outcome := NeutralizeSession(sess, &config.Config{}, false)
+	outcome := NeutralizeSession(sess, &config.Config{
+		DevcontainerFilterRelPath: "proxy/filter.py",
+		AnthropicAllowPattern:     `api\.anthropic\.com`,
+	}, false)
 
-	if outcome.Action != "skipped" {
-		t.Fatalf("outcome.Action: want %q (devcontainer placeholder), got %q",
-			"skipped", outcome.Action)
+	if outcome.Action != "failed" {
+		t.Fatalf("outcome.Action: want %q (no .devcontainer anchor), got %q",
+			"failed", outcome.Action)
+	}
+	if !strings.Contains(outcome.Detail, "no .devcontainer anchor") {
+		t.Fatalf("outcome.Detail should mention missing anchor, got %q", outcome.Detail)
 	}
 	if called {
 		t.Fatal("runPkill was called for a non-local origin")

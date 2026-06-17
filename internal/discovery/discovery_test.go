@@ -6,6 +6,66 @@ import (
 	"testing"
 )
 
+func TestDevcontainerAnchor(t *testing.T) {
+	t.Parallel()
+
+	type tc struct {
+		name      string
+		path      string
+		wantPath  string
+		wantFound bool
+	}
+
+	tests := []tc{
+		{
+			name:      "absolute path with devcontainer",
+			path:      "/repo/.devcontainer/containers/app/home/vscode/.claude/projects/abc/session.jsonl",
+			wantPath:  "/repo/.devcontainer",
+			wantFound: true,
+		},
+		{
+			name:      "deeper devcontainer nesting",
+			path:      "/Users/josh/code/myrepo/.devcontainer/proxy/filter.py",
+			wantPath:  "/Users/josh/code/myrepo/.devcontainer",
+			wantFound: true,
+		},
+		{
+			name:      "devcontainer is the last segment",
+			path:      "/repo/.devcontainer",
+			wantPath:  "/repo/.devcontainer",
+			wantFound: true,
+		},
+		{
+			name:      "no devcontainer in path",
+			path:      "/containers/repo/app/project/session.jsonl",
+			wantPath:  "",
+			wantFound: false,
+		},
+		{
+			name:      "partial match does not count",
+			path:      "/repo/.devcontainer-extra/file.txt",
+			wantPath:  "",
+			wantFound: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got, ok := DevcontainerAnchor(filepath.FromSlash(tt.path))
+			if ok != tt.wantFound {
+				t.Fatalf("DevcontainerAnchor(%q): found=%v, want %v", tt.path, ok, tt.wantFound)
+			}
+			if tt.wantFound {
+				want := filepath.FromSlash(tt.wantPath)
+				if got != want {
+					t.Fatalf("DevcontainerAnchor(%q): path=%q, want %q", tt.path, got, want)
+				}
+			}
+		})
+	}
+}
+
 func TestDeriveLabel(t *testing.T) {
 	tests := []struct {
 		name      string

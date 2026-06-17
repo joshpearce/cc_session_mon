@@ -107,6 +107,23 @@ func deriveLabel(claudeDir string) string {
 	return claudeDir
 }
 
+// DevcontainerAnchor returns the path of the nearest ancestor ".devcontainer"
+// directory of p (the trust boundary for the proxy filter cut), and whether one
+// was found. Scans p's ancestors from the deepest segment upward.
+//
+// For an absolute path such as "/repo/.devcontainer/containers/app/..." the
+// leading empty segment from strings.Split keeps the leading slash intact when
+// the matched prefix is re-joined, so the returned path is always absolute.
+func DevcontainerAnchor(p string) (string, bool) {
+	segments := strings.Split(filepath.ToSlash(filepath.Clean(p)), "/")
+	for i := len(segments) - 1; i >= 0; i-- {
+		if segments[i] == ".devcontainer" {
+			return filepath.FromSlash(strings.Join(segments[:i+1], "/")), true
+		}
+	}
+	return "", false
+}
+
 // relDepth returns how many path segments deep path is below root (0 == root).
 func relDepth(root, path string) int {
 	rel, err := filepath.Rel(root, path)
