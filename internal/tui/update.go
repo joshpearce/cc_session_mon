@@ -79,6 +79,8 @@ func (m Model) updateActiveList(msg tea.Msg) (Model, tea.Cmd) {
 		m.commandList, cmd = m.commandList.Update(msg)
 	case ViewPatterns:
 		m.patternList, cmd = m.patternList.Update(msg)
+	case ViewAudit:
+		m.auditList, cmd = m.auditList.Update(msg)
 	}
 	return m, cmd
 }
@@ -91,6 +93,7 @@ func (m Model) handleTick(now time.Time) Model {
 		m.watcher.RefreshActiveMetrics()
 		m = m.evaluateAlerts(m.watcher.GetSessions(), now)
 		m = m.updateSessionList()
+		m = m.updateAuditList()
 	}
 	return m
 }
@@ -198,6 +201,9 @@ func (m Model) cycleViewForward() Model {
 		m.viewMode = ViewPatterns
 		m = m.aggregatePatterns()
 	case ViewPatterns:
+		m.viewMode = ViewAudit
+		m = m.updateAuditList()
+	case ViewAudit:
 		m.viewMode = ViewSessions
 	}
 	return m
@@ -207,6 +213,9 @@ func (m Model) cycleViewForward() Model {
 func (m Model) cycleViewBackward() Model {
 	switch m.viewMode {
 	case ViewSessions:
+		m.viewMode = ViewAudit
+		m = m.updateAuditList()
+	case ViewAudit:
 		m.viewMode = ViewPatterns
 		m = m.aggregatePatterns()
 	case ViewPatterns:
@@ -250,6 +259,9 @@ func (m Model) handleEnter() (Model, tea.Cmd, bool) {
 
 	case ViewPatterns:
 		// No action on enter in patterns view
+		return m, nil, false
+	case ViewAudit:
+		// No action on enter in audit view
 		return m, nil, false
 	}
 	return m, nil, false
@@ -312,7 +324,7 @@ func (m Model) handleEsc() (Model, tea.Cmd, bool) {
 	return m, nil, true
 }
 
-// handleNumberKeys handles 1/2/3 for direct view switching
+// handleNumberKeys handles 1/2/3/4 for direct view switching
 func (m Model) handleNumberKeys(key string) (Model, bool) {
 	switch key {
 	case "1":
@@ -323,6 +335,10 @@ func (m Model) handleNumberKeys(key string) (Model, bool) {
 		return m, true
 	case "3":
 		m.viewMode = ViewPatterns
+		return m, true
+	case "4":
+		m.viewMode = ViewAudit
+		m = m.updateAuditList()
 		return m, true
 	}
 	return m, false
@@ -354,6 +370,8 @@ func (m Model) handleListNavigation(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	case ViewPatterns:
 		m.patternList, cmd = m.patternList.Update(msg)
+	case ViewAudit:
+		m.auditList, cmd = m.auditList.Update(msg)
 	}
 
 	return m, cmd

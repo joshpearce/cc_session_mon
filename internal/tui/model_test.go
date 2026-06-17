@@ -82,6 +82,13 @@ func TestViewModeCycleRight(t *testing.T) {
 		t.Errorf("expected view mode to be ViewPatterns after 'l', got %d", model.viewMode)
 	}
 
+	// Press 'l' again to go to Audit
+	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'l'}})
+	model = updated.(Model)
+	if model.viewMode != ViewAudit {
+		t.Errorf("expected view mode to be ViewAudit after 'l', got %d", model.viewMode)
+	}
+
 	// Press 'l' again to wrap back to Sessions
 	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'l'}})
 	model = updated.(Model)
@@ -100,11 +107,11 @@ func TestViewModeCycleLeft(t *testing.T) {
 		t.Fatalf("expected initial view mode to be ViewSessions")
 	}
 
-	// Press 'h' to go to Patterns (wrapping backwards)
+	// Press 'h' to go to Audit (wrapping backwards past the new 4th view)
 	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'h'}})
 	model := updated.(Model)
-	if model.viewMode != ViewPatterns {
-		t.Errorf("expected view mode to be ViewPatterns after 'h', got %d", model.viewMode)
+	if model.viewMode != ViewAudit {
+		t.Errorf("expected view mode to be ViewAudit after 'h', got %d", model.viewMode)
 	}
 }
 

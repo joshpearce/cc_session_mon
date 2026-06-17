@@ -32,10 +32,7 @@ func (a *auditLog) append(e AuditEntry) {
 }
 
 // recent returns the entries newest-first (for rendering).
-// Used by the audit panel (Step 3); declared here so the ring buffer is
-// self-contained before the view wires it in.
-//
-//nolint:unused // consumed by the audit panel view added in Step 3
+// Used by the audit panel to populate the auditList.
 func (a *auditLog) recent() []AuditEntry {
 	out := make([]AuditEntry, len(a.entries))
 	for i := range a.entries {

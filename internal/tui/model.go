@@ -26,6 +26,7 @@ const (
 	ViewSessions ViewMode = iota // Session list
 	ViewCommands                 // Command log for selected session
 	ViewPatterns                 // Unique patterns aggregation
+	ViewAudit                    // Audit log of alerts and actions
 )
 
 // ModelOptions configures Model creation
@@ -47,11 +48,13 @@ type Model struct {
 	sessionList list.Model
 	commandList list.Model
 	patternList list.Model
+	auditList   list.Model
 
 	// Delegates (stored to update width)
 	sessionDelegate *sessionDelegate
 	commandDelegate *commandDelegate
 	patternDelegate *patternDelegate
+	auditDelegate   *auditDelegate
 
 	// Aggregated patterns for active session
 	patterns           []*session.CommandPattern
@@ -95,6 +98,7 @@ func NewModel(opts ModelOptions) Model {
 	sessionDel := newSessionDelegate()
 	commandDel := newCommandDelegate()
 	patternDel := newPatternDelegate()
+	auditDel := newAuditDelegate()
 
 	// Watch the local Claude projects directory plus any nested ones found
 	// under the configured search paths.
@@ -108,6 +112,7 @@ func NewModel(opts ModelOptions) Model {
 		sessionDelegate: sessionDel,
 		commandDelegate: commandDel,
 		patternDelegate: patternDel,
+		auditDelegate:   auditDel,
 		alertLatch:      make(map[alertKey]bool),
 		actionStreak:    make(map[alertKey]int),
 		warnedMetrics:   make(map[string]bool),
@@ -142,6 +147,13 @@ func NewModel(opts ModelOptions) Model {
 	m.patternList.SetShowStatusBar(false)
 	m.patternList.SetFilteringEnabled(false)
 	m.patternList.DisableQuitKeybindings()
+
+	m.auditList = list.New([]list.Item{}, auditDel, 0, 0)
+	m.auditList.SetShowTitle(false)
+	m.auditList.SetShowHelp(false)
+	m.auditList.SetShowStatusBar(false)
+	m.auditList.SetFilteringEnabled(false)
+	m.auditList.DisableQuitKeybindings()
 
 	return m
 }
@@ -391,6 +403,18 @@ func (m Model) aggregatePatterns() Model {
 	return m
 }
 
+// updateAuditList rebuilds the audit list items from the ring buffer, newest first.
+func (m Model) updateAuditList() Model {
+	entries := m.audit.recent()
+	items := make([]list.Item, len(entries))
+	for i := range entries {
+		items[i] = auditItem{entry: entries[i]}
+	}
+	m.auditList.SetItems(items)
+	m.auditList.Select(0)
+	return m
+}
+
 // updateListSizes updates list dimensions based on terminal size
 func (m Model) updateListSizes() Model {
 	// Reserve space for header (2), tabs (2), column headers (1), help (2), margins (2)
@@ -422,10 +446,12 @@ func (m Model) updateListSizes() Model {
 	m.sessionDelegate.SetWidth(listWidth)
 	m.commandDelegate.SetWidth(commandListWidth)
 	m.patternDelegate.SetWidth(listWidth)
+	m.auditDelegate.SetWidth(listWidth)
 
 	m.sessionList.SetSize(listWidth, listHeight)
 	m.commandList.SetSize(commandListWidth, commandListHeight)
 	m.patternList.SetSize(listWidth, listHeight)
+	m.auditList.SetSize(listWidth, listHeight)
 
 	return m
 }
