@@ -11,6 +11,12 @@ import (
 // the fallback window and the displayed window can never diverge.
 const DefaultBurnWindow = config.DefaultBurnWindow
 
+// RecentWindow is the fixed short window behind the "(1m)" live-activity
+// metrics: the 1-minute burn rate and the count of subagents active in the last
+// minute. Unlike the configurable burn window it is deliberately not tunable —
+// it answers "what is happening right now".
+const RecentWindow = time.Minute
+
 // UsageEntry is a single timestamped token-accounting sample, extracted from an
 // assistant message's usage block.
 type UsageEntry struct {

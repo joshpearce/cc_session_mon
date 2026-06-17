@@ -30,14 +30,15 @@ func subagentFiles(mainPath string) []string {
 // full on refresh. It is the only place that reads the subtree, so the files are
 // globbed and scanned exactly once each.
 func ScanSubtree(mainPath string) (usages []UsageEntry, agents []AgentNode) {
-	usages, _ = scanTranscript(mainPath)
+	usages, _, _ = scanTranscript(mainPath)
 
 	for _, sp := range subagentFiles(mainPath) {
-		subUsages, lastSeen := scanTranscript(sp)
+		subUsages, firstSeen, lastSeen := scanTranscript(sp)
 		usages = append(usages, subUsages...)
 		agents = append(agents, AgentNode{
-			ID:       agentIDFromPath(sp),
-			LastSeen: lastSeen,
+			ID:        agentIDFromPath(sp),
+			FirstSeen: firstSeen,
+			LastSeen:  lastSeen,
 		})
 	}
 	return usages, agents
@@ -51,13 +52,13 @@ func agentIDFromPath(path string) string {
 }
 
 // scanTranscript reads one JSONL transcript in a single pass, returning the
-// timestamped token-usage samples from its assistant messages and the timestamp
-// of its most recent record (its activity span end). A read error yields an
-// empty result rather than failing the whole subtree.
-func scanTranscript(path string) (usages []UsageEntry, lastSeen time.Time) {
+// timestamped token-usage samples from its assistant messages and the
+// timestamps of its first and most recent records (its activity span). A read
+// error yields an empty result rather than failing the whole subtree.
+func scanTranscript(path string) (usages []UsageEntry, firstSeen, lastSeen time.Time) {
 	file, err := os.Open(path) //nolint:gosec // path from discovered projects dirs
 	if err != nil {
-		return nil, lastSeen
+		return nil, firstSeen, lastSeen
 	}
 	defer file.Close()
 
@@ -71,8 +72,13 @@ func scanTranscript(path string) (usages []UsageEntry, lastSeen time.Time) {
 			continue
 		}
 
-		if t, err := time.Parse(time.RFC3339, record.Timestamp); err == nil && t.After(lastSeen) {
-			lastSeen = t
+		if t, err := time.Parse(time.RFC3339, record.Timestamp); err == nil {
+			if firstSeen.IsZero() || t.Before(firstSeen) {
+				firstSeen = t
+			}
+			if t.After(lastSeen) {
+				lastSeen = t
+			}
 		}
 
 		if record.Type != "assistant" || record.Message == nil || record.Message.Usage == nil {
@@ -91,5 +97,5 @@ func scanTranscript(path string) (usages []UsageEntry, lastSeen time.Time) {
 		usages = append(usages, entry)
 	}
 
-	return usages, lastSeen
+	return usages, firstSeen, lastSeen
 }

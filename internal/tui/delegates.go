@@ -18,18 +18,19 @@ import (
 
 // Fixed column widths for the session list (shared by the header in view.go).
 const (
-	SessionAgentsWidth = 6 // subagents: "current/total", e.g. "3/29"
+	SessionAgentsWidth = 6 // subagents: "peak/active", e.g. "8/0"
 	SessionCmdsWidth   = 5 // command count
 	SessionLastWidth   = 8 // relative time, e.g. "just now"
 )
 
-// formatAgents renders the subagent count column as "current/total", or a dash
-// when the session spawned no subagents.
-func formatAgents(current, total int) string {
-	if total == 0 {
+// formatAgents renders the subagent count column as "peak/active": the peak
+// concurrency over the session's life and the number active in the last minute.
+// A dash is shown when the session spawned no subagents.
+func formatAgents(peak, active int) string {
+	if peak == 0 {
 		return "—"
 	}
-	return fmt.Sprintf("%d/%d", current, total)
+	return fmt.Sprintf("%d/%d", peak, active)
 }
 
 // SessionRateLabel is the burn-rate column header, parameterized by the
@@ -42,6 +43,16 @@ func SessionRateLabel(mins int) string {
 // label and for formatted values like "10.0k".
 func SessionRateWidth(mins int) int {
 	return max(len(SessionRateLabel(mins)), 7)
+}
+
+// SessionRate1mLabel is the fixed 1-minute burn-rate column header.
+func SessionRate1mLabel() string {
+	return "tok/m(1m)"
+}
+
+// SessionRate1mWidth is the fixed 1-minute burn-rate column width.
+func SessionRate1mWidth() int {
+	return max(len(SessionRate1mLabel()), 7)
 }
 
 // ============================================================================
@@ -110,10 +121,13 @@ func (d *sessionDelegate) Render(w io.Writer, m list.Model, index int, item list
 	// the render path only reads finished values.
 	mins := int(config.Global().BurnWindow().Minutes())
 	rate := formatTokPerMin(i.session.Burn.TokensPerMinute)
+	rate1m := formatTokPerMin(i.session.BurnRecent.TokensPerMinute)
 	am := i.session.AgentStats
-	right := fmt.Sprintf("%*s  %*s  %*s  %*s",
+	agents := formatAgents(am.MaxConcurrent, am.ActiveWithin(time.Now(), session.RecentWindow))
+	right := fmt.Sprintf("%*s  %*s  %*s  %*s  %*s",
 		SessionRateWidth(mins), rate,
-		SessionAgentsWidth, formatAgents(am.CurrentAgents, am.TotalAgents),
+		SessionRate1mWidth(), rate1m,
+		SessionAgentsWidth, agents,
 		SessionCmdsWidth, strconv.Itoa(len(i.session.Commands)),
 		SessionLastWidth, formatTimeAgo(i.session.LastActivity),
 	)

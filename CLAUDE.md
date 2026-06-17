@@ -24,6 +24,8 @@ Configuration system with pattern-based tool grouping:
 - `matchPattern()` - Wildcard pattern matching (`*` anywhere in pattern)
 - `GetToolGroup()` - Returns first matching group for a pattern
 - `ShouldExclude()` - Checks if a pattern should be hidden
+- `BurnWindow()` - Returns the configured `burn_window_minutes` as a duration, falling back to `DefaultBurnWindow` (10m) when unset or non-positive; `DefaultBurnWindow` is the single shared source so `session.DefaultBurnWindow` aliases it
+- `Global()` - Returns the process-wide loaded config (read by the session/render paths)
 
 ### internal/discovery
 
@@ -38,7 +40,7 @@ Locates Claude `projects` directories to watch:
 
 Session parsing and monitoring:
 
-- `Session` - Represents a Claude Code session with commands; has `Origin` field (`"local"` or a derived search-path label)
+- `Session` - Represents a Claude Code session with commands; has `Origin` field (`"local"` or a derived search-path label) and the precomputed metrics `Burn`, `BurnRecent`, and `AgentStats` (filled under the watcher lock so the render path only reads finished values)
 - `CommandEntry` - A single tool call with timestamp, tool name, and pattern
 - `CommandPattern` - Aggregated pattern with count and examples
 - `ParseSessionFile()` - Parses JSONL session files
@@ -46,6 +48,16 @@ Session parsing and monitoring:
 - `Watcher` - fsnotify-based file watcher for live updates; monitors multiple project directories
 - `NewWatcher(projectsDirs []string)` - Creates watcher for one or more project directories
 - `SetOrigin(dir, label string)` - Associates an origin label with a projects directory
+- `RefreshActiveMetrics()` - Periodic-tick safety net that recomputes burn/agent metrics for active sessions; does subtree disk I/O *outside* the watcher lock and skips subtrees unchanged by mtime
+
+#### Metrics (burnrate.go, agenttree.go, subtree.go)
+
+- `UsageEntry` - One timestamped token-accounting sample from an assistant message; `BillableTokens()` = input + output + cache-creation (cache *reads* are deliberately excluded so cache-heavy sessions don't all look like they're burning)
+- `BurnRateResult` / `ComputeBurnRate(usages, window)` - Billable tokens-per-minute over a trailing window *anchored on the session's last action* (not wall-clock), so idle sessions still report how hard they were burning before going quiet
+- `RecentWindow` - Fixed 1-minute window behind the live `tok/m(1m)` and "active subagents" figures; intentionally not configurable ("what is happening right now")
+- `AgentNode` - One spawned subagent's id and `[FirstSeen, LastSeen]` activity span (no parent link; nesting depth isn't recoverable from on-disk transcripts)
+- `AgentMetrics` / `ComputeAgentMetrics(nodes)` - `TotalAgents` (lifetime), `MaxConcurrent` (peak overlapping spans via sweep line — "how parallel did it ever get"), and per-agent `LastSeen`; `ActiveWithin(now, window)` counts agents last active within `window` of the wall clock so the "active" figure decays to 0 when a session goes quiet
+- `ScanSubtree(mainPath)` - Reads the main file plus every `subagents/agent-*.jsonl` once each, returning merged `[]UsageEntry` (burn rate) and one `AgentNode` per subagent file (agent counts); the sole reader of the subtree
 
 ## Commands
 
@@ -108,6 +120,12 @@ theme: mocha  # mocha, macchiato, frappe, latte
 search_paths:
   - ~/code
 
+# Trailing window, in minutes, the token burn rate is averaged over for the
+# tok/m(Nm) column (anchored on each session's last action). Omit or set <= 0
+# for the default (10 minutes). The tok/m(1m) column and the "active subagents"
+# count use a fixed 1-minute window that is intentionally not configurable.
+burn_window_minutes: 10
+
 tool_groups:
   - name: dangerous
     color: red
@@ -156,3 +174,12 @@ The `Watcher` monitors multiple project directories simultaneously. Each directo
 
 ### Search-Path Discovery
 At startup `internal/discovery` resolves the local Claude projects dir (`CLAUDE_CONFIG_DIR`-aware) and recursively scans each configured `search_paths` root for nested `.claude/projects` directories. Discovery happens once at startup; new session files inside already-discovered dirs still appear live via fsnotify, but brand-new `.claude` directories require a restart. Recursion is depth-capped and unreadable roots are skipped so a broad search root can't hang or crash the app.
+
+### Token Burn Rate
+The session list shows two burn-rate columns, both billable tokens/min: `tok/m(Nm)` over the configurable `burn_window_minutes` window and `tok/m(1m)` over a fixed 1-minute window. Both windows are anchored on the session's *last action* rather than wall-clock time, so an idle session still reports how hard it was burning right before it went quiet. Billable tokens exclude cache reads (cheap, dominant in normal sessions) so cache-heavy sessions don't all read as runaways.
+
+### Subagent Counts
+The `agents` column reads `peak/active`. `peak` (`MaxConcurrent`) is the lifetime maximum of overlapping subagent activity spans (sweep line over each subagent file's first→last record) — "how parallel did this session ever get". `active` (`ActiveWithin`) counts subagents whose last record is within the trailing 1 minute, evaluated against the wall clock at render, so it decays to 0 within ~30s of a session going quiet. A session with no subagents shows `—`. There is no parent/child tree: the spawning Agent/Task call isn't persisted, so nesting depth can't be reconstructed. See `docs/testing-agent-metrics.md` for a way to drive this metric with a real subagent fan-out.
+
+### Precomputed Metrics Off-Lock
+Burn-rate and agent metrics are computed from the whole transcript subtree (main file + all `subagents/agent-*.jsonl`) and stored on the `Session` as finished values, so the TUI render path never re-scans files. They are recomputed on fsnotify writes and, as a safety net for missed writes or token growth that produced no new command, on the periodic tick via `RefreshActiveMetrics`. That tick does its disk I/O *outside* the watcher lock (so a large/slow subtree on a network mount can't stall `GetSessions`) and skips subtrees unchanged since the last refresh via `subtreeModTime`.

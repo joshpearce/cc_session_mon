@@ -176,7 +176,7 @@ func (w *Watcher) parseSessionFile(path, encodedProject string) *Session {
 	// Token usage (burn-rate) and subagent counts, aggregated over the main file
 	// plus any subagent transcripts, precomputed into finished values here so the
 	// UI render path never re-scans.
-	usages, burn, agentStats := scanAndComputeMetrics(path)
+	usages, burn, burnRecent, agentStats := scanAndComputeMetrics(path)
 
 	// Also parse subagent files if they exist
 	subagentDir := filepath.Join(filepath.Dir(path), sessionID, "subagents")
@@ -229,6 +229,7 @@ func (w *Watcher) parseSessionFile(path, encodedProject string) *Session {
 		Commands:       commands,
 		Usages:         usages,
 		Burn:           burn,
+		BurnRecent:     burnRecent,
 		AgentStats:     agentStats,
 		IsActive:       isActive,
 		Origin:         origin,
@@ -521,11 +522,14 @@ func (w *Watcher) invalidateSortedCache() {
 // scanAndComputeMetrics reads a session's whole transcript subtree from disk and
 // derives its burn-rate and agent-count metrics. It does only I/O and pure
 // computation, so it is safe to call WITHOUT the watcher lock held.
-func scanAndComputeMetrics(mainPath string) (usages []UsageEntry, burn BurnRateResult, agents AgentMetrics) {
-	window := config.Global().BurnWindow()
+func scanAndComputeMetrics(mainPath string) (usages []UsageEntry, burn, burnRecent BurnRateResult, agents AgentMetrics) {
+	cfg := config.Global()
 	var nodes []AgentNode
 	usages, nodes = ScanSubtree(mainPath)
-	return usages, ComputeBurnRate(usages, window), ComputeAgentMetrics(nodes, window)
+	return usages,
+		ComputeBurnRate(usages, cfg.BurnWindow()),
+		ComputeBurnRate(usages, RecentWindow),
+		ComputeAgentMetrics(nodes)
 }
 
 // refreshSessionMetrics recomputes a session's burn-rate and agent-count metrics
@@ -534,9 +538,10 @@ func scanAndComputeMetrics(mainPath string) (usages []UsageEntry, burn BurnRateR
 // a runaway's token cost) so the derived columns track live activity. Caller
 // must hold the watcher lock.
 func refreshSessionMetrics(mainPath string, sess *Session) {
-	usages, burn, agents := scanAndComputeMetrics(mainPath)
+	usages, burn, burnRecent, agents := scanAndComputeMetrics(mainPath)
 	sess.Usages = usages
 	sess.Burn = burn
+	sess.BurnRecent = burnRecent
 	sess.AgentStats = agents
 	sess.metricsModTime = subtreeModTime(mainPath)
 }
@@ -588,11 +593,12 @@ func (w *Watcher) RefreshActiveMetrics() {
 		if !mod.After(t.prevMod) {
 			continue // unchanged since the last refresh — skip the re-read
 		}
-		usages, burn, agents := scanAndComputeMetrics(t.mainPath) // off-lock I/O
+		usages, burn, burnRecent, agents := scanAndComputeMetrics(t.mainPath) // off-lock I/O
 
 		w.mu.Lock()
 		t.sess.Usages = usages
 		t.sess.Burn = burn
+		t.sess.BurnRecent = burnRecent
 		t.sess.AgentStats = agents
 		t.sess.metricsModTime = mod
 		w.mu.Unlock()

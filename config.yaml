@@ -10,6 +10,16 @@ search_paths:
 # All themes are from the Catppuccin color palette
 theme: frappe
 
+# Burn-rate window: trailing window, in minutes, over which the token burn rate
+# (billable tokens/min) is averaged for the tok/m(Nm) column. The window is
+# anchored on each session's last action, so idle sessions still report how hard
+# they were burning. Omit or set <= 0 to use the default (10 minutes).
+#
+# The session list also shows a tok/m(1m) column and an "active in the last
+# minute" subagent count, both over a fixed 1-minute window that is intentionally
+# not configurable — they answer "what is happening right now".
+burn_window_minutes: 10
+
 # Tool groups define how commands are styled and filtered.
 # Groups are checked in order - first match wins.
 #

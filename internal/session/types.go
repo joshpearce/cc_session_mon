@@ -14,11 +14,13 @@ type Session struct {
 	IsActive     bool           // True if file modified recently (within 5 minutes)
 	Origin       string         // "local" or a derived label for a search-path dir
 
-	// Burn and AgentStats are precomputed when the session's transcripts are
-	// (re)parsed, under the watcher lock, so the UI render path only reads
-	// finished values instead of re-scanning Usages every frame. See
-	// Watcher.refreshSessionMetrics.
+	// Burn, BurnRecent and AgentStats are precomputed when the session's
+	// transcripts are (re)parsed, under the watcher lock, so the UI render path
+	// only reads finished values instead of re-scanning Usages every frame. Burn
+	// uses the configurable window; BurnRecent uses the fixed RecentWindow (1m).
+	// See Watcher.refreshSessionMetrics.
 	Burn       BurnRateResult
+	BurnRecent BurnRateResult
 	AgentStats AgentMetrics
 
 	// metricsModTime is the subtree modification time the precomputed metrics

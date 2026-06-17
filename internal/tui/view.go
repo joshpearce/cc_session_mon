@@ -216,8 +216,9 @@ func (m Model) renderSessionHeaders() string {
 	mins := int(config.Global().BurnWindow().Minutes())
 	// Two leading spaces match the row's active/inactive indicator width.
 	left := "  Session Path"
-	right := fmt.Sprintf("%*s  %*s  %*s  %*s",
+	right := fmt.Sprintf("%*s  %*s  %*s  %*s  %*s",
 		SessionRateWidth(mins), SessionRateLabel(mins),
+		SessionRate1mWidth(), SessionRate1mLabel(),
 		SessionAgentsWidth, "agents",
 		SessionCmdsWidth, "cmds",
 		SessionLastWidth, "last",

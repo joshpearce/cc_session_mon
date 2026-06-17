@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"sync"
 	"testing"
+	"time"
 )
 
 // TestGetSessions_ConcurrentWithRefresh reproduces the render-vs-watcher data
@@ -54,7 +55,9 @@ func TestGetSessions_ConcurrentWithRefresh(t *testing.T) {
 		for range iterations {
 			for _, s := range w.GetSessions() {
 				_ = s.Burn.TokensPerMinute
-				_ = s.AgentStats.CurrentAgents
+				_ = s.BurnRecent.TokensPerMinute
+				_ = s.AgentStats.MaxConcurrent
+				_ = s.AgentStats.ActiveWithin(time.Now(), RecentWindow)
 				_ = len(s.Commands)
 			}
 		}
