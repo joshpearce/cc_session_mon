@@ -131,7 +131,7 @@ search_paths:
 burn_window_minutes: 10
 
 # Metric-threshold alert rules evaluated on each 30s UI tick.
-# Omitting this key keeps the built-in default rule below.
+# Omit this key to keep the default rule; an empty or null `alerts:` disables all alerting.
 # alert_threshold  → console bell (BEL), once per crossing.
 # action_threshold → corrective action when enable_corrective_actions is true.
 # action_sustained_ticks → consecutive over-threshold ticks before action fires.

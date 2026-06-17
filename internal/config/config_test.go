@@ -3,7 +3,11 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"reflect"
+	"regexp"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 )
 
 func TestDefaultConfig(t *testing.T) {
@@ -255,6 +259,11 @@ func TestDefaultConfigAlertRules(t *testing.T) {
 	if cfg.AnthropicAllowPattern == "" {
 		t.Error("AnthropicAllowPattern should be non-empty")
 	}
+
+	// The default AnthropicAllowPattern must compile as a valid Go regex.
+	if _, err := regexp.Compile(cfg.AnthropicAllowPattern); err != nil {
+		t.Errorf("default AnthropicAllowPattern must compile: %v", err)
+	}
 }
 
 func TestLoadOmittedAlertsKeepsDefaults(t *testing.T) {
@@ -362,6 +371,29 @@ alerts:
 	}
 	if !cfg.ActionDryRun {
 		t.Error("ActionDryRun should be true when set in YAML")
+	}
+
+	// Round-trip: marshal the loaded config back to YAML, then unmarshal into a
+	// fresh Config and verify that Alerts and the two action booleans survive
+	// re-encoding unchanged.
+	encoded, err := yaml.Marshal(cfg)
+	if err != nil {
+		t.Fatalf("yaml.Marshal() error = %v", err)
+	}
+	var roundTripped Config
+	if err := yaml.Unmarshal(encoded, &roundTripped); err != nil {
+		t.Fatalf("yaml.Unmarshal() after re-encode error = %v", err)
+	}
+	if !reflect.DeepEqual(cfg.Alerts, roundTripped.Alerts) {
+		t.Errorf("Alerts did not survive round-trip:\n  before: %+v\n  after:  %+v", cfg.Alerts, roundTripped.Alerts)
+	}
+	if cfg.EnableCorrectiveActions != roundTripped.EnableCorrectiveActions {
+		t.Errorf("EnableCorrectiveActions round-trip: before=%v, after=%v",
+			cfg.EnableCorrectiveActions, roundTripped.EnableCorrectiveActions)
+	}
+	if cfg.ActionDryRun != roundTripped.ActionDryRun {
+		t.Errorf("ActionDryRun round-trip: before=%v, after=%v",
+			cfg.ActionDryRun, roundTripped.ActionDryRun)
 	}
 }
 

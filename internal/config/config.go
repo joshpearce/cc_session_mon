@@ -67,7 +67,9 @@ type Config struct {
 	BurnWindowMinutes int `yaml:"burn_window_minutes"`
 
 	// Alerts is the list of metric-threshold rules evaluated on each UI tick.
-	// Rules provided in YAML replace the defaults; omit the key to keep defaults.
+	// Rules provided in YAML replace the defaults; omit the key to keep the
+	// default rule. An explicit empty or null value (alerts: [] / alerts:)
+	// disables all alerting — use this intentionally.
 	Alerts []AlertRule `yaml:"alerts"`
 
 	// EnableCorrectiveActions is the master opt-in for side-effecting actions
@@ -83,9 +85,12 @@ type Config struct {
 	// the .devcontainer anchor directory (e.g. "proxy/filter.py").
 	DevcontainerFilterRelPath string `yaml:"devcontainer_filter_rel_path"`
 
-	// AnthropicAllowPattern is a regex matching the api.anthropic.com allow-rule
-	// line in the devcontainer proxy filter.py. Used to locate the line to comment
-	// out when taking corrective action on a devcontainer session.
+	// AnthropicAllowPattern is a regex used to locate the api.anthropic.com
+	// allow-rule line in the devcontainer proxy filter.py when taking corrective
+	// action. The default (api\.anthropic\.com) matches any line that contains
+	// the api.anthropic.com host as a substring — it is not anchored. Override
+	// with a fully anchored pattern (e.g. ^ALLOW\s+api\.anthropic\.com$) if
+	// stricter matching is needed for your filter.py format.
 	AnthropicAllowPattern string `yaml:"anthropic_allow_pattern"`
 }
 
