@@ -47,6 +47,21 @@ func TestDevcontainerAnchor(t *testing.T) {
 			wantPath:  "",
 			wantFound: false,
 		},
+		// Cases required by the Step-5 test specification:
+		{
+			// Exact path from the plan spec: .devcontainer is at depth 2.
+			name:      "plan_spec_enc_session",
+			path:      "/repo/.devcontainer/containers/app/.claude/projects/enc/x.jsonl",
+			wantPath:  "/repo/.devcontainer",
+			wantFound: true,
+		},
+		{
+			// Two .devcontainer segments: the function must return the deepest one.
+			name:      "nested_deepest_wins",
+			path:      "/a/.devcontainer/b/.devcontainer/c/x",
+			wantPath:  "/a/.devcontainer/b/.devcontainer",
+			wantFound: true,
+		},
 	}
 
 	for _, tt := range tests {

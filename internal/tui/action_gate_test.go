@@ -1,6 +1,8 @@
 package tui
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -306,5 +308,159 @@ func TestCorrectiveAction_UntrustedPathGate(t *testing.T) {
 	// Session must be latched so it cannot re-fire.
 	if !m.actionLatch[untrustedSess.FilePath] {
 		t.Fatal("untrusted-path session must be latched after skipped action to prevent re-fire")
+	}
+}
+
+// filterPyContent is the representative proxy allow-list used in Part C.
+const filterPyContent = `# proxy allow list
+ALLOW = [
+    "api.anthropic.com",
+    "github.com",
+]
+`
+
+// buildDevcontainerIntegrationFixture creates the devcontainer layout under
+// t.TempDir() and returns a *session.Session and the absolute path to filter.py.
+//
+// Layout mirrors what the monitor discovers at runtime:
+//
+//	<tmp>/repo/.devcontainer/proxy/filter.py          ← filter file
+//	<tmp>/repo/.devcontainer/containers/app/.claude/projects/enc/uuid.jsonl ← session
+//
+// The session FilePath is intentionally placed under the "enc" projects dir so
+// the trusted-path gate passes when trustedRoots includes that dir.
+func buildDevcontainerIntegrationFixture(t *testing.T) (sess *session.Session, filterPath, projectsDir string) {
+	t.Helper()
+	tmp := t.TempDir()
+
+	anchor := filepath.Join(tmp, "repo", ".devcontainer")
+	projectsDir = filepath.Join(anchor, "containers", "app", ".claude", "projects", "enc")
+	if err := os.MkdirAll(projectsDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll projectsDir: %v", err)
+	}
+
+	filterDir := filepath.Join(anchor, "proxy")
+	if err := os.MkdirAll(filterDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll filterDir: %v", err)
+	}
+	filterPath = filepath.Join(filterDir, "filter.py")
+	if err := os.WriteFile(filterPath, []byte(filterPyContent), 0o644); err != nil {
+		t.Fatalf("WriteFile filter.py: %v", err)
+	}
+
+	sessionFilePath := filepath.Join(projectsDir, "abc123.jsonl")
+	now := time.Now()
+	// Build a session over the action threshold (45 agents) with non-local origin.
+	lastSeen := make([]time.Time, 45)
+	for i := range lastSeen {
+		lastSeen[i] = now
+	}
+	sess = &session.Session{
+		ID:       "integration-devcontainer-session",
+		FilePath: sessionFilePath,
+		Origin:   "repo/app",
+		AgentStats: session.AgentMetrics{
+			TotalAgents:   45,
+			MaxConcurrent: 45,
+			LastSeen:      lastSeen,
+		},
+	}
+	return
+}
+
+// TestCorrectiveAction_DevcontainerFilterCutRecorded is an end-to-end integration
+// test: it verifies that when a devcontainer session trips the action threshold
+// the TUI alert engine (evaluateAlerts) calls NeutralizeSession, which comments
+// the allow-rule line in the fixture filter.py, and records an audit entry with
+// Action=="filter-cut".
+//
+// This exercises the Step-5 "Done when" criterion: a devcontainer session
+// tripping an action threshold has its Anthropic allow-rule commented and the
+// result is recorded in the audit panel.
+//
+// No t.Parallel(): mutates the process-wide config global.
+func TestCorrectiveAction_DevcontainerFilterCutRecorded(t *testing.T) {
+	// Restore process-wide config on exit.
+	prev := config.Global()
+	t.Cleanup(func() { config.SetGlobal(prev) })
+
+	sess, filterPath, projectsDir := buildDevcontainerIntegrationFixture(t)
+
+	cfg := &config.Config{
+		EnableCorrectiveActions:   true,
+		ActionDryRun:              false,
+		DevcontainerFilterRelPath: "proxy/filter.py",
+		AnthropicAllowPattern:     `api\.anthropic\.com`,
+		Alerts: []config.AlertRule{
+			{
+				Metric:               "active_subagents",
+				AlertThreshold:       20,
+				ActionThreshold:      40,
+				ActionSustainedTicks: 1,
+			},
+		},
+	}
+	config.SetGlobal(cfg)
+
+	bells := 0
+	// trustedRoots must include a prefix of sess.FilePath so the trusted-path gate passes.
+	m := makeActionModel(&bells, []string{projectsDir})
+	now := time.Now()
+
+	m = m.evaluateAlerts([]*session.Session{sess}, now)
+
+	// Assert: an audit entry with Action=="filter-cut" exists.
+	var filterCutEntry *AuditEntry
+	for i := range m.audit.entries {
+		if m.audit.entries[i].Action == "filter-cut" {
+			e := m.audit.entries[i]
+			filterCutEntry = &e
+			break
+		}
+	}
+	if filterCutEntry == nil {
+		t.Fatalf("expected an audit entry with Action==%q, but none found; entries: %+v",
+			"filter-cut", m.audit.entries)
+	}
+	if filterCutEntry.FilePath != sess.FilePath {
+		t.Errorf("audit entry FilePath: want %q, got %q", sess.FilePath, filterCutEntry.FilePath)
+	}
+	if filterCutEntry.Origin != sess.Origin {
+		t.Errorf("audit entry Origin: want %q, got %q", sess.Origin, filterCutEntry.Origin)
+	}
+	if filterCutEntry.Metric != "active_subagents" {
+		t.Errorf("audit entry Metric: want %q, got %q", "active_subagents", filterCutEntry.Metric)
+	}
+
+	// Assert: the allow-rule line in filter.py is now commented.
+	got, err := os.ReadFile(filterPath) //nolint:gosec // test fixture
+	if err != nil {
+		t.Fatalf("ReadFile filter.py after evaluateAlerts: %v", err)
+	}
+	gotStr := string(got)
+
+	// The allow line must now start with "# ".
+	foundCommented := false
+	for _, line := range strings.Split(gotStr, "\n") {
+		if strings.HasPrefix(line, "# ") && strings.Contains(line, "api.anthropic.com") {
+			foundCommented = true
+			break
+		}
+	}
+	if !foundCommented {
+		t.Errorf("expected allow-rule line to be commented in filter.py after filter-cut;\ngot content:\n%s", gotStr)
+	}
+
+	// The plain (uncommented) allow line must no longer appear.
+	for _, line := range strings.Split(gotStr, "\n") {
+		trimmed := strings.TrimLeft(line, " \t")
+		if strings.Contains(trimmed, "api.anthropic.com") && !strings.HasPrefix(trimmed, "#") {
+			t.Errorf("uncommented allow-rule line still present after filter-cut: %q", line)
+		}
+	}
+
+	// Session must be action-latched after the cut.
+	if !m.actionLatch[sess.FilePath] {
+		t.Fatal("session must be action-latched after filter-cut")
 	}
 }
