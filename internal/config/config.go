@@ -4,9 +4,14 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
+
+// DefaultBurnWindow is the trailing window used for burn-rate calculation when
+// none is configured.
+const DefaultBurnWindow = 10 * time.Minute
 
 // ToolGroup defines a group of patterns with styling
 type ToolGroup struct {
@@ -38,6 +43,11 @@ type Config struct {
 	// .claude/projects directories (e.g. devcontainer mounts). The user's
 	// local Claude projects directory is always watched in addition to these.
 	SearchPaths []string `yaml:"search_paths"`
+
+	// BurnWindowMinutes is the trailing window, in minutes, over which the token
+	// burn rate is averaged (measured back from a session's last action). Zero
+	// or negative falls back to the default window.
+	BurnWindowMinutes int `yaml:"burn_window_minutes"`
 }
 
 // DefaultConfig returns the default configuration
@@ -102,6 +112,15 @@ func DefaultConfig() *Config {
 			},
 		},
 	}
+}
+
+// BurnWindow returns the configured burn-rate window as a duration, falling
+// back to DefaultBurnWindow when unset or non-positive.
+func (c *Config) BurnWindow() time.Duration {
+	if c.BurnWindowMinutes <= 0 {
+		return DefaultBurnWindow
+	}
+	return time.Duration(c.BurnWindowMinutes) * time.Minute
 }
 
 // Load reads the config from a YAML file, falling back to defaults

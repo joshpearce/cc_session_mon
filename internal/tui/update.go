@@ -86,6 +86,7 @@ func (m Model) handleTick() Model {
 	if m.watcher != nil {
 		m.watcher.RefreshActivityStatus()
 		m.watcher.ScanForNewSubagents()
+		m.watcher.RefreshActiveMetrics()
 		m = m.updateSessionList()
 	}
 	return m

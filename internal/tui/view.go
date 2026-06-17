@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 
+	"cc_session_mon/internal/config"
+
 	"github.com/charmbracelet/lipgloss"
 )
 
@@ -207,11 +209,27 @@ func (m Model) renderSearchBar() string {
 	return SearchBarStyle().Render(m.searchInput.View())
 }
 
-// renderSessionHeaders renders column headers for the session list
+// renderSessionHeaders renders fixed-width column headers for the session list.
+// The right columns use the same widths and format string as the row delegate
+// (sessionDelegate.Render) so the header lines up with the values beneath it.
 func (m Model) renderSessionHeaders() string {
-	// Session list doesn't have fixed columns, just a simple indicator
-	header := "  Session Path"
-	return ColumnHeaderStyle(m.width - 4).Render(header)
+	mins := int(config.Global().BurnWindow().Minutes())
+	// Two leading spaces match the row's active/inactive indicator width.
+	left := "  Session Path"
+	right := fmt.Sprintf("%*s  %*s  %*s  %*s",
+		SessionRateWidth(mins), SessionRateLabel(mins),
+		SessionAgentsWidth, "agents",
+		SessionCmdsWidth, "cmds",
+		SessionLastWidth, "last",
+	)
+
+	width := m.width - 4
+	pad := width - lipgloss.Width(left) - lipgloss.Width(right)
+	if pad < 1 {
+		pad = 1
+	}
+	header := left + strings.Repeat(" ", pad) + right
+	return ColumnHeaderStyle(width).Render(header)
 }
 
 // renderCommandHeaders renders column headers for the command list

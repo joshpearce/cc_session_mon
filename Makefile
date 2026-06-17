@@ -27,7 +27,7 @@ run:
 	go run .
 
 test:
-	go test -v ./...
+	go test -race -timeout 120s -v ./...
 
 lint:
 	golangci-lint run

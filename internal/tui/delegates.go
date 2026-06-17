@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -14,6 +15,34 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 )
+
+// Fixed column widths for the session list (shared by the header in view.go).
+const (
+	SessionAgentsWidth = 6 // subagents: "current/total", e.g. "3/29"
+	SessionCmdsWidth   = 5 // command count
+	SessionLastWidth   = 8 // relative time, e.g. "just now"
+)
+
+// formatAgents renders the subagent count column as "current/total", or a dash
+// when the session spawned no subagents.
+func formatAgents(current, total int) string {
+	if total == 0 {
+		return "—"
+	}
+	return fmt.Sprintf("%d/%d", current, total)
+}
+
+// SessionRateLabel is the burn-rate column header, parameterized by the
+// configured window in minutes (e.g. "tok/m(10m)").
+func SessionRateLabel(mins int) string {
+	return fmt.Sprintf("tok/m(%dm)", mins)
+}
+
+// SessionRateWidth is the burn-rate column width: wide enough for the header
+// label and for formatted values like "10.0k".
+func SessionRateWidth(mins int) int {
+	return max(len(SessionRateLabel(mins)), 7)
+}
 
 // ============================================================================
 // Session Item
@@ -75,27 +104,42 @@ func (d *sessionDelegate) Render(w io.Writer, m list.Model, index int, item list
 		originTag = " ▣ " + i.session.Origin
 	}
 
-	name := i.session.ProjectPath
-	info := fmt.Sprintf(" %d cmds | %s",
-		len(i.session.Commands),
-		formatTimeAgo(i.session.LastActivity),
+	// Fixed-width right columns: rate | agents | cmds | last. Built with the same
+	// format string as the header (renderSessionHeaders) so the columns line up.
+	// Metrics are precomputed on the session (see Watcher.refreshSessionMetrics);
+	// the render path only reads finished values.
+	mins := int(config.Global().BurnWindow().Minutes())
+	rate := formatTokPerMin(i.session.Burn.TokensPerMinute)
+	am := i.session.AgentStats
+	right := fmt.Sprintf("%*s  %*s  %*s  %*s",
+		SessionRateWidth(mins), rate,
+		SessionAgentsWidth, formatAgents(am.CurrentAgents, am.TotalAgents),
+		SessionCmdsWidth, strconv.Itoa(len(i.session.Commands)),
+		SessionLastWidth, formatTimeAgo(i.session.LastActivity),
 	)
 
-	// Calculate available space for name (use lipgloss.Width for Unicode-safe measurement)
-	availableWidth := d.width - lipgloss.Width(originTag) - lipgloss.Width(indicator) - lipgloss.Width(info) - 2
-	if availableWidth < 10 {
-		availableWidth = 10
+	// The remaining space is the flexible left region: path followed by the
+	// origin tag. Reserve a two-space gutter before the right columns. The floor
+	// is kept small so on a narrow terminal the path absorbs the shrink and the
+	// (fixed, narrow) metric columns stay on screen rather than being clipped.
+	leftWidth := d.width - lipgloss.Width(indicator) - lipgloss.Width(right) - 2
+	if leftWidth < 4 {
+		leftWidth = 4
 	}
 
-	// Truncate or pad name
-	if len(name) > availableWidth {
-		name = name[:availableWidth-3] + "..."
+	// The origin tag is kept whole; the path takes whatever width remains and is
+	// truncated by display width (not byte length) so multibyte paths never get
+	// sliced mid-rune.
+	nameSpace := leftWidth - lipgloss.Width(originTag)
+	if nameSpace < 1 {
+		nameSpace = 1
 	}
+	name := truncateToWidth(i.session.ProjectPath, nameSpace)
 
-	// Layout: indicator + left-aligned path + origin tag + right-aligned info.
-	// The path always starts at the same column and the tag follows it directly;
-	// padding fills the gap so the info column stays right-aligned on every row.
-	row := indicator + name + originTag + strings.Repeat(" ", max(0, availableWidth-len(name))) + info
+	left := name + originTag
+	left += strings.Repeat(" ", max(0, leftWidth-lipgloss.Width(left)))
+
+	row := indicator + left + "  " + right
 
 	// Apply styling
 	var style lipgloss.Style
@@ -337,6 +381,49 @@ func (d *patternDelegate) Render(w io.Writer, m list.Model, index int, item list
 // ============================================================================
 // Helper Functions
 // ============================================================================
+
+// truncateToWidth shortens s to fit w display columns, appending an ellipsis
+// when it has to cut. It measures by display width and cuts on rune boundaries
+// so multibyte paths are never sliced mid-rune.
+func truncateToWidth(s string, w int) string {
+	if w <= 0 {
+		return ""
+	}
+	if lipgloss.Width(s) <= w {
+		return s
+	}
+	if w == 1 {
+		return "…"
+	}
+	var b strings.Builder
+	width := 0
+	for _, r := range s {
+		rw := lipgloss.Width(string(r))
+		if width+rw > w-1 { // reserve one column for the ellipsis
+			break
+		}
+		b.WriteRune(r)
+		width += rw
+	}
+	return b.String() + "…"
+}
+
+// formatTokPerMin renders a tokens-per-minute rate compactly for the session
+// list column. Zero (idle / no usage) renders as a dash.
+func formatTokPerMin(v float64) string {
+	switch {
+	case v <= 0:
+		return "—"
+	case v < 1000:
+		return fmt.Sprintf("%.0f", v)
+	case v < 10000:
+		return fmt.Sprintf("%.1fk", v/1000)
+	case v < 1_000_000:
+		return fmt.Sprintf("%.0fk", v/1000)
+	default:
+		return fmt.Sprintf("%.1fM", v/1_000_000)
+	}
+}
 
 // formatTimeAgo returns a human-readable relative time string
 func formatTimeAgo(t time.Time) string {
