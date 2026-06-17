@@ -1,5 +1,11 @@
 # cc_session_mon configuration
 
+# Search paths: roots scanned recursively at startup for nested
+# .claude/projects directories (e.g. devcontainer mounts). The local Claude
+# projects dir is always watched in addition to these. Supports a leading ~.
+search_paths:
+  - ~/code
+
 # Theme: mocha (darkest), macchiato, frappe, latte (lightest)
 # All themes are from the Catppuccin color palette
 theme: frappe

@@ -68,10 +68,11 @@ func (d *sessionDelegate) Render(w io.Writer, m list.Model, index int, item list
 		indicator = "  "
 	}
 
-	// Add origin tag for devagent sessions
+	// Tag sessions discovered outside the local projects dir with their origin
+	// label (e.g. a devcontainer repo/container name).
 	var originTag string
 	if i.session.Origin != "" && i.session.Origin != "local" {
-		originTag = "[da] "
+		originTag = " ▣ " + i.session.Origin
 	}
 
 	name := i.session.ProjectPath
@@ -91,7 +92,10 @@ func (d *sessionDelegate) Render(w io.Writer, m list.Model, index int, item list
 		name = name[:availableWidth-3] + "..."
 	}
 
-	row := originTag + indicator + name + strings.Repeat(" ", max(0, availableWidth-len(name))) + info
+	// Layout: indicator + left-aligned path + origin tag + right-aligned info.
+	// The path always starts at the same column and the tag follows it directly;
+	// padding fills the gap so the info column stays right-aligned on every row.
+	row := indicator + name + originTag + strings.Repeat(" ", max(0, availableWidth-len(name))) + info
 
 	// Apply styling
 	var style lipgloss.Style
