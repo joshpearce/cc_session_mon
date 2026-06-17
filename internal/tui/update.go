@@ -45,9 +45,6 @@ func (m Model) handleNonKeyMsg(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tickMsg:
 		m = m.handleTick()
 		cmds = append(cmds, m.tickCmd())
-		if m.followDevagent {
-			cmds = append(cmds, m.devagentRefreshCmd())
-		}
 
 	case errMsg:
 		m.err = msg.error
@@ -59,11 +56,6 @@ func (m Model) handleNonKeyMsg(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case detailErrorMsg:
 		m.loadingDetail = false
 		m.detailError = msg.error
-
-	case devagentRefreshMsg:
-		if newCmd := m.handleDevagentRefresh(msg); newCmd != nil {
-			cmds = append(cmds, newCmd)
-		}
 	}
 
 	// Update the active list component
@@ -493,26 +485,4 @@ func (m Model) handleSessionEvent(event sessionEventMsg) Model {
 	m = m.aggregatePatterns()
 
 	return m
-}
-
-// handleDevagentRefresh processes devagent environment refresh
-func (m Model) handleDevagentRefresh(msg devagentRefreshMsg) tea.Cmd {
-	if m.watcher == nil {
-		return nil
-	}
-
-	newDirsAdded := false
-	for _, env := range msg.envs {
-		if m.watcher.AddProjectsDir(env.ProjectsDir) {
-			newDirsAdded = true
-		}
-		m.watcher.SetOrigin(env.ProjectsDir, "devagent:"+env.ContainerName)
-	}
-
-	// If new directories were added, discover sessions again
-	if newDirsAdded {
-		return m.discoverSessionsCmd()
-	}
-
-	return nil
 }

@@ -3,7 +3,6 @@ package session
 import (
 	"os"
 	"path/filepath"
-	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -27,7 +26,7 @@ type Watcher struct {
 	offsets      map[string]int64    // file read offsets for incremental parsing
 	lineNumbers  map[string]int      // line numbers for incremental parsing (1-indexed, next line to read)
 	subagentMap  map[string]string   // maps subagent file path -> main session file path
-	originMap    map[string]string   // maps projectsDir path to origin label (e.g. "local" or "devagent:container-name")
+	originMap    map[string]string   // maps projectsDir path to origin label (e.g. "local" or a search-path label)
 	mu           sync.RWMutex
 
 	// Cached sorted sessions to avoid re-sorting on every GetSessions call
@@ -71,8 +70,8 @@ func (w *Watcher) DiscoverSessions() ([]*Session, error) {
 
 	for _, projectsDir := range w.projectsDirs {
 		// Watch the projects directory so we detect new project subdirectories.
-		// If it doesn't exist yet (e.g., devagent container with no sessions),
-		// watch the parent directory so we detect when it gets created.
+		// If it doesn't exist yet, watch the parent directory so we detect when
+		// it gets created.
 		if err := w.fsWatcher.Add(projectsDir); err != nil {
 			_ = w.fsWatcher.Add(filepath.Dir(projectsDir))
 		}
@@ -224,20 +223,6 @@ func (w *Watcher) parseSessionFile(path, encodedProject string) *Session {
 		IsActive:     isActive,
 		Origin:       origin,
 	}
-}
-
-// AddProjectsDir adds a new directory to the list of directories to monitor.
-// Returns true if added, false if already tracked.
-func (w *Watcher) AddProjectsDir(dir string) bool {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-
-	if slices.Contains(w.projectsDirs, dir) {
-		return false
-	}
-
-	w.projectsDirs = append(w.projectsDirs, dir)
-	return true
 }
 
 // SetOrigin sets the origin label for a projects directory.

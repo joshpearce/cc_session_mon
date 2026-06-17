@@ -1,13 +1,12 @@
 package tui
 
 import (
-	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 	"time"
 
-	"cc_session_mon/internal/devagent"
+	"cc_session_mon/internal/discovery"
 	"cc_session_mon/internal/session"
 
 	"github.com/charmbracelet/bubbles/list"
@@ -26,7 +25,9 @@ const (
 
 // ModelOptions configures Model creation
 type ModelOptions struct {
-	FollowDevagent bool
+	// SearchPaths are roots scanned recursively at startup for nested
+	// .claude/projects directories, in addition to the local one.
+	SearchPaths []string
 }
 
 // Model represents the application state
@@ -73,56 +74,18 @@ type Model struct {
 
 	// Error state
 	err error
-
-	// Devagent support
-	followDevagent bool
 }
 
 // NewModel creates a new Model with initialized state
 func NewModel(opts ModelOptions) Model {
-	var projectsDirs []string
-	var watcher *session.Watcher
-	var err error
-
 	// Create delegates
 	sessionDel := newSessionDelegate()
 	commandDel := newCommandDelegate()
 	patternDel := newPatternDelegate()
 
-	// Initialize based on devagent flag
-	if opts.FollowDevagent {
-		// Discover devagent environments and build projects dirs
-		envs, discoverErr := devagent.Discover()
-		if discoverErr != nil {
-			// Fall back to local if discovery fails
-			projectsDir := filepath.Join(os.Getenv("HOME"), ".claude", "projects")
-			projectsDirs = []string{projectsDir}
-			watcher, err = session.NewWatcher(projectsDirs)
-			if err == nil {
-				watcher.SetOrigin(projectsDir, "local")
-			}
-		} else {
-			// Build projects dirs from environments
-			for _, env := range envs {
-				projectsDirs = append(projectsDirs, env.ProjectsDir)
-			}
-			watcher, err = session.NewWatcher(projectsDirs)
-			if err == nil {
-				// Set origin labels for each environment
-				for _, env := range envs {
-					watcher.SetOrigin(env.ProjectsDir, "devagent:"+env.ContainerName)
-				}
-			}
-		}
-	} else {
-		// Local mode: use ~/.claude/projects
-		projectsDir := filepath.Join(os.Getenv("HOME"), ".claude", "projects")
-		projectsDirs = []string{projectsDir}
-		watcher, err = session.NewWatcher(projectsDirs)
-		if err == nil {
-			watcher.SetOrigin(projectsDir, "local")
-		}
-	}
+	// Watch the local Claude projects directory plus any nested ones found
+	// under the configured search paths.
+	watcher, err := buildWatcher(opts.SearchPaths)
 
 	m := Model{
 		watcher:         watcher,
@@ -132,7 +95,6 @@ func NewModel(opts ModelOptions) Model {
 		sessionDelegate: sessionDel,
 		commandDelegate: commandDel,
 		patternDelegate: patternDel,
-		followDevagent:  opts.FollowDevagent,
 	}
 
 	// Initialize search input
@@ -166,6 +128,36 @@ func NewModel(opts ModelOptions) Model {
 	return m
 }
 
+// buildWatcher creates a session watcher for the local Claude projects
+// directory plus any nested ones discovered under the configured search paths.
+// Duplicate paths are dropped, with the local directory taking precedence.
+func buildWatcher(searchPaths []string) (*session.Watcher, error) {
+	dirs := make([]discovery.ProjectsDir, 0, 1+len(searchPaths))
+	dirs = append(dirs, discovery.ProjectsDir{Path: discovery.LocalProjectsDir(), Label: "local"})
+	dirs = append(dirs, discovery.FindProjectsDirs(searchPaths)...)
+
+	seen := make(map[string]bool)
+	paths := make([]string, 0, len(dirs))
+	unique := make([]discovery.ProjectsDir, 0, len(dirs))
+	for _, d := range dirs {
+		if seen[d.Path] {
+			continue
+		}
+		seen[d.Path] = true
+		paths = append(paths, d.Path)
+		unique = append(unique, d)
+	}
+
+	watcher, err := session.NewWatcher(paths)
+	if err != nil {
+		return nil, err
+	}
+	for _, d := range unique {
+		watcher.SetOrigin(d.Path, d.Label)
+	}
+	return watcher, nil
+}
+
 // Init implements tea.Model
 func (m Model) Init() tea.Cmd {
 	return tea.Batch(
@@ -182,9 +174,6 @@ type (
 	errMsg                struct{ error }    // General error
 	detailLoadedMsg       *session.ToolInput // Tool input loaded successfully
 	detailErrorMsg        struct{ error }    // Error loading tool input
-	devagentRefreshMsg    struct {
-		envs []devagent.Environment
-	}
 )
 
 // discoverSessionsCmd discovers existing sessions
@@ -221,17 +210,6 @@ func (m Model) tickCmd() tea.Cmd {
 	return tea.Tick(30*time.Second, func(t time.Time) tea.Msg {
 		return tickMsg(t)
 	})
-}
-
-// devagentRefreshCmd discovers devagent environments and returns a refresh message
-func (m Model) devagentRefreshCmd() tea.Cmd {
-	return func() tea.Msg {
-		envs, err := devagent.Discover()
-		if err != nil {
-			return errMsg{err}
-		}
-		return devagentRefreshMsg{envs: envs}
-	}
 }
 
 // loadDetailCmd asynchronously loads tool input for a command

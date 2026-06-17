@@ -48,7 +48,7 @@ func newTestModelWithSessions() Model {
 }
 
 func TestNewModel(t *testing.T) {
-	m := NewModel(ModelOptions{FollowDevagent: false})
+	m := NewModel(ModelOptions{})
 	if m.viewMode != ViewSessions {
 		t.Errorf("expected initial view mode to be ViewSessions, got %d", m.viewMode)
 	}
@@ -58,7 +58,7 @@ func TestNewModel(t *testing.T) {
 }
 
 func TestViewModeCycleRight(t *testing.T) {
-	m := NewModel(ModelOptions{FollowDevagent: false})
+	m := NewModel(ModelOptions{})
 	// Set dimensions so view works
 	m.width = 80
 	m.height = 24
@@ -91,7 +91,7 @@ func TestViewModeCycleRight(t *testing.T) {
 }
 
 func TestViewModeCycleLeft(t *testing.T) {
-	m := NewModel(ModelOptions{FollowDevagent: false})
+	m := NewModel(ModelOptions{})
 	m.width = 80
 	m.height = 24
 
@@ -109,7 +109,7 @@ func TestViewModeCycleLeft(t *testing.T) {
 }
 
 func TestViewModeNumbers(t *testing.T) {
-	m := NewModel(ModelOptions{FollowDevagent: false})
+	m := NewModel(ModelOptions{})
 	m.width = 80
 	m.height = 24
 
@@ -136,7 +136,7 @@ func TestViewModeNumbers(t *testing.T) {
 }
 
 func TestEscReturnsToSessions(t *testing.T) {
-	m := NewModel(ModelOptions{FollowDevagent: false})
+	m := NewModel(ModelOptions{})
 	m.width = 80
 	m.height = 24
 	m.viewMode = ViewCommands

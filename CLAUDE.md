@@ -1,8 +1,8 @@
 # cc_session_mon
 
-Last verified: 2026-02-06
+Last verified: 2026-06-17
 
-A Go TUI application for monitoring Claude Code sessions using Bubbletea, Bubbles, and Lipgloss. Supports monitoring both local sessions and sessions running inside devagent containers.
+A Go TUI application for monitoring Claude Code sessions using Bubbletea, Bubbles, and Lipgloss. Monitors the user's local sessions plus any nested `.claude/projects` directories found under configured search paths (e.g. devcontainer mounts).
 
 ## Architecture
 
@@ -25,28 +25,26 @@ Configuration system with pattern-based tool grouping:
 - `GetToolGroup()` - Returns first matching group for a pattern
 - `ShouldExclude()` - Checks if a pattern should be hidden
 
-### internal/devagent
+### internal/discovery
 
-Discovers devagent container environments for remote session monitoring:
+Locates Claude `projects` directories to watch:
 
-- `Discover()` - Runs `devagent list` CLI and returns `[]Environment`
-- `ParseOutput(data []byte)` - Parses JSON output from devagent list
-- `Environment` - Container name, project path, host-side projects dir, state
-- Finds the `/home/vscode/.claude` mount, strips `/host_mnt` prefix (macOS Docker), appends `/projects`
-- Containers without a `.claude` mount are skipped
+- `LocalProjectsDir()` - Resolves the local Claude projects dir, honoring `CLAUDE_CONFIG_DIR` (the same override Claude Code uses), falling back to `$HOME/.claude/projects`
+- `FindProjectsDirs(roots []string)` - Recursively scans each search root for `.claude/projects` directories, returning `[]ProjectsDir{Path, Label}`; recursion is capped at `maxSearchDepth`, missing/unreadable roots are skipped, results are deduped by path
+- `ProjectsDir` - A discovered projects dir plus a short origin label
+- `deriveLabel()` - Pure helper that derives a label from a `.claude` path; for devcontainer layouts (`<repo>/.devcontainer/containers/<name>/...`) it yields `<repo>/<name>`, otherwise it falls back to the parent dir name
 
 ### internal/session
 
 Session parsing and monitoring:
 
-- `Session` - Represents a Claude Code session with commands; has `Origin` field (`"local"` or `"devagent:<container-name>"`)
+- `Session` - Represents a Claude Code session with commands; has `Origin` field (`"local"` or a derived search-path label)
 - `CommandEntry` - A single tool call with timestamp, tool name, and pattern
 - `CommandPattern` - Aggregated pattern with count and examples
 - `ParseSessionFile()` - Parses JSONL session files
 - `GenericInput` - Extracts display strings from any tool's JSON input
 - `Watcher` - fsnotify-based file watcher for live updates; monitors multiple project directories
 - `NewWatcher(projectsDirs []string)` - Creates watcher for one or more project directories
-- `AddProjectsDir(dir string) bool` - Dynamically adds a directory to monitor
 - `SetOrigin(dir, label string)` - Associates an origin label with a projects directory
 
 ## Commands
@@ -68,7 +66,7 @@ Session parsing and monitoring:
 
 ### CLI Flags
 
-- `--follow-devagent` - Monitor sessions in devagent containers (discovers environments via `devagent list`)
+None. Configuration is via `config.yaml` (see Configuration below).
 
 ## Development Workflow
 
@@ -103,6 +101,12 @@ Config file at `~/.config/cc_session_mon/config.yaml`:
 
 ```yaml
 theme: mocha  # mocha, macchiato, frappe, latte
+
+# Roots scanned recursively at startup for nested .claude/projects directories
+# (e.g. devcontainer mounts). The local Claude projects dir is always watched
+# in addition to these. Supports a leading ~ for $HOME.
+search_paths:
+  - ~/code
 
 tool_groups:
   - name: dangerous
@@ -148,7 +152,7 @@ Lists preserve scroll position during updates unless: session changes, initial l
 The patterns view shows aggregated command patterns for the currently selected session only, not across all sessions.
 
 ### Multi-Directory Watching
-The `Watcher` monitors multiple project directories simultaneously. Each directory has an origin label (e.g., `"local"`, `"devagent:container-name"`). Sessions inherit the origin of the directory they were discovered in. When `--follow-devagent` is enabled, devagent environments are re-discovered on each tick and new directories are added dynamically via `AddProjectsDir`.
+The `Watcher` monitors multiple project directories simultaneously. Each directory has an origin label (e.g., `"local"`, or a derived `<repo>/<container>` label). Sessions inherit the origin of the directory they were discovered in and non-local origins are shown as a `[label]` tag in the session list.
 
-### Devagent Integration
-Devagent environments are discovered by running `devagent list` and parsing its JSON output. The host-side session path is derived from the container's `.claude` mount point. Sessions from devagent containers display a `[da]` tag in the session list. If devagent discovery fails, the app falls back to local-only monitoring.
+### Search-Path Discovery
+At startup `internal/discovery` resolves the local Claude projects dir (`CLAUDE_CONFIG_DIR`-aware) and recursively scans each configured `search_paths` root for nested `.claude/projects` directories. Discovery happens once at startup; new session files inside already-discovered dirs still appear live via fsnotify, but brand-new `.claude` directories require a restart. Recursion is depth-capped and unreadable roots are skipped so a broad search root can't hang or crash the app.

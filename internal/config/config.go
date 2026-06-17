@@ -33,6 +33,11 @@ type Config struct {
 
 	// ToolGroups defines styling groups for commands (checked in order, first match wins)
 	ToolGroups []ToolGroup `yaml:"tool_groups"`
+
+	// SearchPaths are roots scanned recursively at startup for nested
+	// .claude/projects directories (e.g. devcontainer mounts). The user's
+	// local Claude projects directory is always watched in addition to these.
+	SearchPaths []string `yaml:"search_paths"`
 }
 
 // DefaultConfig returns the default configuration
