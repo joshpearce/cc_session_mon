@@ -81,12 +81,19 @@ type Model struct {
 	height int
 
 	// Alert-engine state. alertLatch and actionStreak are keyed per (session
-	// FilePath, rule metric); the action latch (Step 4) will be keyed per session.
+	// FilePath, rule metric); actionLatch is keyed per session FilePath and
+	// ensures each session is acted on at most once regardless of which rule
+	// tripped.
 	alertLatch    map[alertKey]bool
 	actionStreak  map[alertKey]int
+	actionLatch   map[string]bool // per-session (FilePath) one-shot action gate
 	warnedMetrics map[string]bool // unknown metric names already logged (log-once)
 	audit         *auditLog
 	bell          func() // emits the alert bell; injectable for tests
+
+	// trustedRoots are the watched projects directories; corrective actions are
+	// restricted to sessions whose FilePath falls within one of these roots.
+	trustedRoots []string
 
 	// Error state
 	err error
@@ -115,9 +122,13 @@ func NewModel(opts ModelOptions) Model {
 		auditDelegate:   auditDel,
 		alertLatch:      make(map[alertKey]bool),
 		actionStreak:    make(map[alertKey]int),
+		actionLatch:     make(map[string]bool),
 		warnedMetrics:   make(map[string]bool),
 		audit:           &auditLog{},
 		bell:            func() { fmt.Fprint(os.Stderr, "\a") }, // BEL on stderr survives alt-screen
+	}
+	if watcher != nil {
+		m.trustedRoots = watcher.ProjectsDirs()
 	}
 
 	// Initialize search input
