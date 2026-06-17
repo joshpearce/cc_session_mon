@@ -138,6 +138,32 @@ func TestMetricTokensPerMin1m_LiveValuePassesThrough(t *testing.T) {
 	}
 }
 
+// TestMetricTokensPerMin1m_ZeroWindowEndReturnsZero verifies the degenerate
+// case: a session that has never produced any usage samples has a zero-value
+// BurnRecent (WindowEnd is the zero time). now.Sub(zero) is enormous, so the
+// liveness gate returns 0 regardless of TokensPerMinute.
+func TestMetricTokensPerMin1m_ZeroWindowEndReturnsZero(t *testing.T) {
+	t.Parallel()
+
+	mf, ok := Metric("tokens_per_min_1m")
+	if !ok {
+		t.Fatal("tokens_per_min_1m not registered")
+	}
+
+	now := time.Now()
+	sess := &Session{
+		BurnRecent: BurnRateResult{
+			// WindowEnd is zero (time.Time{}) — session has never had usage samples.
+			TokensPerMinute: 99999,
+		},
+	}
+
+	got := mf(sess, now)
+	if got != 0 {
+		t.Fatalf("expected 0 for zero-WindowEnd (never-active) session, got %v", got)
+	}
+}
+
 // TestMetricBoundaries checks the precise boundary semantics for both metrics.
 //
 // active_subagents: a subagent last-seen exactly at now-RecentWindow is COUNTED

@@ -21,9 +21,9 @@ func (m Model) evaluateAlerts(sessions []*session.Session, now time.Time) Model 
 				if !m.warnedMetrics[rule.Metric] {
 					m.warnedMetrics[rule.Metric] = true
 					m.audit.append(AuditEntry{
-						Time:   now,
-						Metric: rule.Metric,
-						Action: "config-error",
+						Time:    now,
+						Metric:  rule.Metric,
+						Action:  "config-error",
 						Outcome: "unknown metric",
 					})
 				}
