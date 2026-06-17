@@ -18,12 +18,27 @@ type JSONLRecord struct {
 	GitBranch string   `json:"gitBranch"`
 	CWD       string   `json:"cwd"`
 	Message   *Message `json:"message,omitempty"`
+
+	// Present only in subagent transcripts (<session>/<id>/subagents/agent-<id>.jsonl):
+	AgentID          string `json:"agentId,omitempty"`          // the subagent's own id
+	AttributionAgent string `json:"attributionAgent,omitempty"` // agent type, e.g. "claude-code-guide"
 }
 
 // Message represents the message field in a JSONL record
 type Message struct {
 	Role    string        `json:"role"`
 	Content []ContentItem `json:"content"`
+	Usage   *Usage        `json:"usage,omitempty"`
+}
+
+// Usage mirrors the token-accounting block on an assistant message.
+// Only the fields relevant to burn-rate are captured; the on-disk block
+// carries additional metadata (service_tier, iterations, ...) we ignore.
+type Usage struct {
+	InputTokens         int `json:"input_tokens"`
+	OutputTokens        int `json:"output_tokens"`
+	CacheCreationTokens int `json:"cache_creation_input_tokens"`
+	CacheReadTokens     int `json:"cache_read_input_tokens"`
 }
 
 // ContentItem represents an item in the content array

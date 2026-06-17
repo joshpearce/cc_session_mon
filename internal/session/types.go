@@ -10,8 +10,22 @@ type Session struct {
 	GitBranch    string         // Current git branch
 	LastActivity time.Time      // Timestamp of last command
 	Commands     []CommandEntry // All write operation commands
+	Usages       []UsageEntry   // Timestamped token usage samples (for burn rate)
 	IsActive     bool           // True if file modified recently (within 5 minutes)
 	Origin       string         // "local" or a derived label for a search-path dir
+
+	// Burn, BurnRecent and AgentStats are precomputed when the session's
+	// transcripts are (re)parsed, under the watcher lock, so the UI render path
+	// only reads finished values instead of re-scanning Usages every frame. Burn
+	// uses the configurable window; BurnRecent uses the fixed RecentWindow (1m).
+	// See Watcher.refreshSessionMetrics.
+	Burn       BurnRateResult
+	BurnRecent BurnRateResult
+	AgentStats AgentMetrics
+
+	// metricsModTime is the subtree modification time the precomputed metrics
+	// were last derived from, used to skip redundant re-reads on the tick.
+	metricsModTime time.Time
 }
 
 // CommandEntry represents a single tool invocation
