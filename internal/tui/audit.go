@@ -14,7 +14,7 @@ type AuditEntry struct {
 	Metric    string
 	Value     float64
 	Threshold float64
-	Action    string // "alert", "config-error"; and later "pkill" / "filter-cut" / "dry-run" / "skipped"
+	Action    string // "alert" | "config-error" | "pkill" | "filter-cut" | "dry-run" | "skipped" | "failed"
 	Outcome   string // human-readable result, e.g. "bell", "killed", "unknown metric"
 }
 

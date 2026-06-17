@@ -457,10 +457,7 @@ func (d *auditDelegate) Render(w io.Writer, m list.Model, index int, item list.I
 
 	// Value/Threshold column: format compactly.
 	valStr := formatAuditValue(i.entry.Value) + "/" + formatAuditValue(i.entry.Threshold)
-	valueStr := padRight(valStr, AuditValueWidth)
-	if len(valueStr) > AuditValueWidth {
-		valueStr = valueStr[:AuditValueWidth]
-	}
+	valueStr := truncateToWidth(padRight(valStr, AuditValueWidth), AuditValueWidth)
 
 	// Action column
 	actionStr := truncateToWidth(padRight(i.entry.Action, AuditActionWidth), AuditActionWidth)

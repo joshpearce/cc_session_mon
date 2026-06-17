@@ -217,3 +217,44 @@ func TestNeutralizeSession_NonLocalOrigin(t *testing.T) {
 		t.Fatal("runPkill was called for a non-local origin")
 	}
 }
+
+// TestKillLocal_ShortOrRelativeProjectPathSkipped verifies the defense-in-depth
+// guard in killLocal: empty, relative, and very short absolute ProjectPaths are
+// rejected with Action=="skipped" before reaching runPkill, preventing a
+// dangerously broad pkill -f pattern.
+func TestKillLocal_ShortOrRelativeProjectPathSkipped(t *testing.T) {
+	// No t.Parallel(): mutates package-global runPkill.
+	type tc struct {
+		name        string
+		projectPath string
+	}
+	tests := []tc{
+		{name: "empty", projectPath: ""},
+		{name: "relative", projectPath: "some/relative/path"},
+		{name: "root_slash", projectPath: "/"},
+		{name: "too_short_absolute", projectPath: "/ab"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			called := false
+			orig := runPkill
+			runPkill = func(_ string) (bool, error) {
+				called = true
+				return true, nil
+			}
+			t.Cleanup(func() { runPkill = orig })
+
+			sess := &Session{Origin: "local", ProjectPath: tt.projectPath}
+			outcome := NeutralizeSession(sess, &config.Config{}, false)
+
+			if outcome.Action != "skipped" {
+				t.Fatalf("ProjectPath=%q: want Action==%q, got %q",
+					tt.projectPath, "skipped", outcome.Action)
+			}
+			if called {
+				t.Fatalf("ProjectPath=%q: runPkill was called despite unsafe path", tt.projectPath)
+			}
+		})
+	}
+}

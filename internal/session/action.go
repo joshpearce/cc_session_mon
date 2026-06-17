@@ -69,6 +69,16 @@ func NeutralizeSession(sess *Session, cfg *config.Config, dryRun bool) ActionOut
 }
 
 func killLocal(sess *Session, dryRun bool) ActionOutcome {
+	// Guard: ProjectPath must be an absolute path of meaningful length before it
+	// is used as a pkill -f substring. An empty or very short pattern (e.g. "/")
+	// would match unrelated processes on the host — an irreversible mistake.
+	// filepath.IsAbs rejects both empty strings and relative paths.
+	if !filepath.IsAbs(sess.ProjectPath) || len(sess.ProjectPath) < 4 {
+		return ActionOutcome{
+			Action: "skipped",
+			Detail: "ProjectPath too short or not absolute for safe pkill: " + sess.ProjectPath,
+		}
+	}
 	// ProjectPath is untrusted transcript content; QuoteMeta so it is matched
 	// literally by pkill's regex, never interpreted as a pattern.
 	pattern := regexp.QuoteMeta(sess.ProjectPath)
