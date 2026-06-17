@@ -1,6 +1,8 @@
 package tui
 
 import (
+	"fmt"
+	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -13,6 +15,9 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 )
+
+// alertKey identifies a (session, rule) pair for alert and action-streak latches.
+type alertKey struct{ filePath, metric string }
 
 // ViewMode represents the current view
 type ViewMode int
@@ -72,6 +77,14 @@ type Model struct {
 	width  int
 	height int
 
+	// Alert-engine state. alertLatch and actionStreak are keyed per (session
+	// FilePath, rule metric); the action latch (Step 4) will be keyed per session.
+	alertLatch    map[alertKey]bool
+	actionStreak  map[alertKey]int
+	warnedMetrics map[string]bool // unknown metric names already logged (log-once)
+	audit         *auditLog
+	bell          func() // emits the alert bell; injectable for tests
+
 	// Error state
 	err error
 }
@@ -95,6 +108,11 @@ func NewModel(opts ModelOptions) Model {
 		sessionDelegate: sessionDel,
 		commandDelegate: commandDel,
 		patternDelegate: patternDel,
+		alertLatch:      make(map[alertKey]bool),
+		actionStreak:    make(map[alertKey]int),
+		warnedMetrics:   make(map[string]bool),
+		audit:           &auditLog{},
+		bell:            func() { fmt.Fprint(os.Stderr, "\a") }, // BEL on stderr survives alt-screen
 	}
 
 	// Initialize search input

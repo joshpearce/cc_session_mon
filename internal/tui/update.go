@@ -1,6 +1,8 @@
 package tui
 
 import (
+	"time"
+
 	"cc_session_mon/internal/session"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -43,7 +45,7 @@ func (m Model) handleNonKeyMsg(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmds = append(cmds, m.watchSessionsCmd())
 
 	case tickMsg:
-		m = m.handleTick()
+		m = m.handleTick(time.Time(msg))
 		cmds = append(cmds, m.tickCmd())
 
 	case errMsg:
@@ -81,12 +83,13 @@ func (m Model) updateActiveList(msg tea.Msg) (Model, tea.Cmd) {
 	return m, cmd
 }
 
-// handleTick refreshes activity status on timer tick
-func (m Model) handleTick() Model {
+// handleTick refreshes activity status and evaluates alert rules on timer tick.
+func (m Model) handleTick(now time.Time) Model {
 	if m.watcher != nil {
 		m.watcher.RefreshActivityStatus()
 		m.watcher.ScanForNewSubagents()
 		m.watcher.RefreshActiveMetrics()
+		m = m.evaluateAlerts(m.watcher.GetSessions(), now)
 		m = m.updateSessionList()
 	}
 	return m
