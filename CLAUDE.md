@@ -26,6 +26,10 @@ Configuration system with pattern-based tool grouping:
 - `ShouldExclude()` - Checks if a pattern should be hidden
 - `BurnWindow()` - Returns the configured `burn_window_minutes` as a duration, falling back to `DefaultBurnWindow` (10m) when unset or non-positive; `DefaultBurnWindow` is the single shared source so `session.DefaultBurnWindow` aliases it
 - `Global()` - Returns the process-wide loaded config (read by the session/render paths)
+- `AlertRule` - A threshold-alert rule for one named live metric (`Metric`, `AlertThreshold`, `ActionThreshold`, `ActionSustainedTicks`). Thresholds are `float64` to cover counts and token rates.
+- `Config.Alerts` - Slice of `AlertRule` evaluated on each UI tick; YAML key `alerts` replaces defaults when provided. Defaults ship one rule: `{active_subagents, 20, 40, 1}`.
+- `Config.EnableCorrectiveActions` / `ActionDryRun` - Master opt-in and dry-run flag for side-effecting actions; both default false (app is read-only until opt-in).
+- `Config.DevcontainerFilterRelPath` / `AnthropicAllowPattern` - Devcontainer proxy filter path (relative to `.devcontainer` anchor) and regex locating the `api.anthropic.com` allow-rule line.
 
 ### internal/discovery
 
@@ -125,6 +129,28 @@ search_paths:
 # for the default (10 minutes). The tok/m(1m) column and the "active subagents"
 # count use a fixed 1-minute window that is intentionally not configurable.
 burn_window_minutes: 10
+
+# Metric-threshold alert rules evaluated on each 30s UI tick.
+# Omitting this key keeps the built-in default rule below.
+# alert_threshold  → console bell (BEL), once per crossing.
+# action_threshold → corrective action when enable_corrective_actions is true.
+# action_sustained_ticks → consecutive over-threshold ticks before action fires.
+alerts:
+  - metric: active_subagents
+    alert_threshold: 20
+    action_threshold: 40
+    action_sustained_ticks: 1  # fires on the first over-threshold tick
+  # Uncomment and calibrate to also alert on recent token burn rate:
+  # - metric: tokens_per_min_1m
+  #   alert_threshold: 5000
+  #   action_threshold: 10000
+  #   action_sustained_ticks: 2
+
+# Corrective-action settings — all default to safe/off values.
+enable_corrective_actions: false  # master opt-in; app is read-only by default
+action_dry_run: false             # when true, log intended actions without executing
+devcontainer_filter_rel_path: proxy/filter.py  # path relative to .devcontainer anchor
+anthropic_allow_pattern: 'api\.anthropic\.com'  # regex matching the allow-rule line
 
 tool_groups:
   - name: dangerous

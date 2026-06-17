@@ -31,6 +31,23 @@ type ToolGroup struct {
 	Exclude bool `yaml:"exclude"`
 }
 
+// AlertRule defines a threshold-alert rule for one named live metric. Thresholds
+// are float64 to cover both integer counts (subagents) and token rates.
+type AlertRule struct {
+	// Metric is the registry key for the live metric to evaluate (e.g. "active_subagents").
+	Metric string `yaml:"metric"`
+
+	// AlertThreshold is the value at or above which the alert bell fires (once per crossing).
+	AlertThreshold float64 `yaml:"alert_threshold"`
+
+	// ActionThreshold is the value at or above which a corrective action is considered.
+	ActionThreshold float64 `yaml:"action_threshold"`
+
+	// ActionSustainedTicks is the number of consecutive over-threshold ticks required
+	// before the action fires. Default 1 fires on the first over-threshold tick.
+	ActionSustainedTicks int `yaml:"action_sustained_ticks"`
+}
+
 // Config holds the application configuration
 type Config struct {
 	// Theme is the color theme to use (mocha, macchiato, frappe, latte)
@@ -48,12 +65,46 @@ type Config struct {
 	// burn rate is averaged (measured back from a session's last action). Zero
 	// or negative falls back to the default window.
 	BurnWindowMinutes int `yaml:"burn_window_minutes"`
+
+	// Alerts is the list of metric-threshold rules evaluated on each UI tick.
+	// Rules provided in YAML replace the defaults; omit the key to keep defaults.
+	Alerts []AlertRule `yaml:"alerts"`
+
+	// EnableCorrectiveActions is the master opt-in for side-effecting actions
+	// (pkill, filter.py edits). Default false — the app is read-only until this
+	// is explicitly set to true.
+	EnableCorrectiveActions bool `yaml:"enable_corrective_actions"`
+
+	// ActionDryRun, when true, logs the intended action without executing it.
+	// Requires EnableCorrectiveActions to be meaningful.
+	ActionDryRun bool `yaml:"action_dry_run"`
+
+	// DevcontainerFilterRelPath is the path to the proxy filter file relative to
+	// the .devcontainer anchor directory (e.g. "proxy/filter.py").
+	DevcontainerFilterRelPath string `yaml:"devcontainer_filter_rel_path"`
+
+	// AnthropicAllowPattern is a regex matching the api.anthropic.com allow-rule
+	// line in the devcontainer proxy filter.py. Used to locate the line to comment
+	// out when taking corrective action on a devcontainer session.
+	AnthropicAllowPattern string `yaml:"anthropic_allow_pattern"`
 }
 
 // DefaultConfig returns the default configuration
 func DefaultConfig() *Config {
 	return &Config{
 		Theme: "mocha",
+		// Alerts ships with one rule: alert at 20 active subagents, act at 40.
+		// Corrective actions are off by default (EnableCorrectiveActions: false).
+		Alerts: []AlertRule{
+			{
+				Metric:               "active_subagents",
+				AlertThreshold:       20,
+				ActionThreshold:      40,
+				ActionSustainedTicks: 1,
+			},
+		},
+		DevcontainerFilterRelPath: "proxy/filter.py",
+		AnthropicAllowPattern:     `api\.anthropic\.com`,
 		ToolGroups: []ToolGroup{
 			{
 				Name:  "dangerous",
