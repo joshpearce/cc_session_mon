@@ -10,9 +10,11 @@ This app follows the Elm Architecture (Model-Update-View):
 
 - `internal/tui/model.go` - Application state (`Model`, `ModelOptions`), session management, pattern aggregation
 - `internal/tui/update.go` - Event handling (keyboard input, file events, timers)
-- `internal/tui/view.go` - UI rendering with tabs for sessions/commands/patterns
+- `internal/tui/view.go` - UI rendering with tabs for sessions/commands/patterns/audit
 - `internal/tui/styles.go` - Lipgloss style definitions, Catppuccin theming
 - `internal/tui/delegates.go` - List item rendering delegates
+- `internal/tui/alerts.go` - `evaluateAlerts` runs each configured rule against every session on the 30s tick; split into `applyAlertTier` (bell + alert latch) and `applyActionTier` (sustained-streak tracking + gated corrective-action dispatch)
+- `internal/tui/audit.go` - `auditLog` fixed-capacity (50) ring buffer; `AuditEntry` records alert/action/skip/config-error events; `recent()` returns entries newest-first for the Audit view
 
 ## Key Packages
 
@@ -63,6 +65,13 @@ Session parsing and monitoring:
 - `AgentNode` - One spawned subagent's id and `[FirstSeen, LastSeen]` activity span (no parent link; nesting depth isn't recoverable from on-disk transcripts)
 - `AgentMetrics` / `ComputeAgentMetrics(nodes)` - `TotalAgents` (lifetime), `MaxConcurrent` (peak overlapping spans via sweep line — "how parallel did it ever get"), and per-agent `LastSeen`; `ActiveWithin(now, window)` counts agents last active within `window` of the wall clock so the "active" figure decays to 0 when a session goes quiet
 - `ScanSubtree(mainPath)` - Reads the main file plus every `subagents/agent-*.jsonl` once each, returning merged `[]UsageEntry` (burn rate) and one `AgentNode` per subagent file (agent counts); the sole reader of the subtree
+
+#### Metric registry (metrics.go)
+
+- `MetricFunc` - `func(s *Session, now time.Time) float64`; each metric is responsible for its own wall-clock liveness (an idle session should decay to a non-tripping value rather than latching a threshold forever)
+- `metricRegistry` - String-keyed map of `MetricFunc`; `Metric(name)` is the public accessor. Adding a metric = one registry entry + a config rule; no control-flow changes required.
+- `"active_subagents"` - Delegates to `AgentStats.ActiveWithin(now, RecentWindow)`; inherits that function's wall-clock decay.
+- `"tokens_per_min_1m"` - Returns `BurnRecent.TokensPerMinute` but gates to 0 once `now - BurnRecent.WindowEnd > RecentWindow`, so a session that burned hard then went quiet doesn't trip forever.
 
 #### Corrective actions (action.go)
 
@@ -216,3 +225,23 @@ The `agents` column reads `peak/active`. `peak` (`MaxConcurrent`) is the lifetim
 
 ### Precomputed Metrics Off-Lock
 Burn-rate and agent metrics are computed from the whole transcript subtree (main file + all `subagents/agent-*.jsonl`) and stored on the `Session` as finished values, so the TUI render path never re-scans files. They are recomputed on fsnotify writes and, as a safety net for missed writes or token growth that produced no new command, on the periodic tick via `RefreshActiveMetrics`. That tick does its disk I/O *outside* the watcher lock (so a large/slow subtree on a network mount can't stall `GetSessions`) and skips subtrees unchanged since the last refresh via `subtreeModTime`.
+
+### Metric-Alert Engine and Corrective Actions
+
+**Metric registry.** Each alertable metric is a `MetricFunc` in a string-keyed registry (`internal/session/metrics.go`). Every metric enforces its own wall-clock liveness: `active_subagents` delegates to `ActiveWithin` (which decays naturally), and `tokens_per_min_1m` gates to 0 once the session has been idle longer than `RecentWindow`. Adding a new alert metric requires only a registry entry and a config rule; no control-flow changes.
+
+**Alert vs action tiers.** Each `AlertRule` has two independent thresholds:
+
+- *Alert tier* (`AlertThreshold`): fires a stderr BEL once per threshold crossing, latched per `(FilePath, metric)` and cleared when the metric drops back below. A non-positive `AlertThreshold` disables this tier entirely.
+- *Action tier* (`ActionThreshold`): maintains a consecutive over-threshold tick streak per `(FilePath, metric)`; when the streak reaches `ActionSustainedTicks`, the corrective action is considered. A non-positive `ActionThreshold` resets the streak to 0 and never acts.
+
+**Safety rails (action tier only).** All of the following must hold before an action fires: (1) `EnableCorrectiveActions: true` in config (default false; app is read-only until opt-in); (2) the session has not been acted on yet — a per-session `actionLatch` keyed by `FilePath` ensures each session is acted on at most once regardless of how many rules trip; (3) `IsTrustedPath` verifies the session's `FilePath` lies within a watched projects root, so a crafted transcript path can't steer a kill or file-edit outside the monitored tree; (4) the streak has reached `ActionSustainedTicks`. `ActionDryRun: true` logs the intended action without executing it.
+
+**Local vs devcontainer dispatch.** `NeutralizeSession` dispatches by `sess.Origin`:
+
+- Local (`origin == "" || "local"`): `killLocal` runs `pkill -f` with `regexp.QuoteMeta(sess.ProjectPath)` — no shell, pattern is matched literally. Exit code 1 (no match) is reported but not treated as an error.
+- Devcontainer: `cutDevcontainer` walks `sess.FilePath` up to its `.devcontainer` anchor via `discovery.DevcontainerAnchor`, joins `cfg.DevcontainerFilterRelPath`, verifies the joined path remains under the anchor (rejects `..` traversal), then prefix-comments (`# `) every uncommented line matching `cfg.AnthropicAllowPattern` in the proxy `filter.py`. The write is atomic (temp + `os.Rename`) and idempotent (already-commented lines are untouched). **There is no rollback** — the cut persists until hand-edited. `pkill -f` is similarly best-effort and leaves no undo path.
+
+**Audit ring buffer.** Every alert, action, skip, and config-error is appended to a fixed-capacity (50-entry) `auditLog` ring buffer on the `Model`. Entries are displayed newest-first in the 4th TUI view ("Audit", key `4`). The buffer is in-memory only; it is not persisted across restarts.
+
+**Adding a `tokens_per_min_1m` alert** requires only a config entry — no code changes.
