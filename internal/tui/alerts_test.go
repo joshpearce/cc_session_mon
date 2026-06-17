@@ -14,10 +14,20 @@ func makeAlertModel(bells *int) Model {
 	return Model{
 		alertLatch:    map[alertKey]bool{},
 		actionStreak:  map[alertKey]int{},
+		actionLatch:   map[string]bool{},
 		warnedMetrics: map[string]bool{},
 		audit:         &auditLog{},
 		bell:          func() { *bells++ },
 	}
+}
+
+// makeActionModel builds a bare Model with alert-engine fields and trustedRoots
+// initialized. It is a superset of makeAlertModel suited for tests that exercise
+// the Step-4 corrective-action gate.
+func makeActionModel(bells *int, trustedRoots []string) Model {
+	m := makeAlertModel(bells)
+	m.trustedRoots = trustedRoots
+	return m
 }
 
 // sessionWithActiveAgents builds a Session whose AgentStats.LastSeen contains
