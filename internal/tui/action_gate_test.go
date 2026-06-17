@@ -200,6 +200,67 @@ func TestCorrectiveAction_PerSessionLatch(t *testing.T) {
 	}
 }
 
+// TestZeroThresholdRuleNeverActsOrAlerts verifies that a rule whose
+// AlertThreshold and ActionThreshold are both zero (non-positive) is entirely
+// inert: it never rings the bell, never appends an alert or action audit entry,
+// and never sets actionLatch — regardless of the observed metric value.
+//
+// Note: no t.Parallel() because this test mutates the process-wide config global.
+func TestZeroThresholdRuleNeverActsOrAlerts(t *testing.T) {
+	prev := config.Global()
+	config.SetGlobal(&config.Config{
+		EnableCorrectiveActions: true,
+		ActionDryRun:            true,
+		Alerts: []config.AlertRule{
+			{
+				Metric:               "active_subagents",
+				AlertThreshold:       0,
+				ActionThreshold:      0,
+				ActionSustainedTicks: 1,
+			},
+		},
+	})
+	t.Cleanup(func() { config.SetGlobal(prev) })
+
+	bells := 0
+	m := makeActionModel(&bells, []string{"/trusted"})
+	now := time.Now()
+
+	// Active session — 5 subagents; v >= 0 would be true for any metric value,
+	// so without the guard this would ding and act on every session.
+	active := trustedSession("zero-active", 5, now)
+
+	// Idle session — 0 subagents; should also be completely inert.
+	idle := trustedSession("zero-idle", 0, now)
+
+	m = m.evaluateAlerts([]*session.Session{active, idle}, now)
+
+	if bells != 0 {
+		t.Fatalf("expected 0 bells for zero-threshold rule, got %d", bells)
+	}
+
+	for _, e := range m.audit.entries {
+		if e.Action == "alert" {
+			t.Errorf("unexpected alert audit entry: %+v", e)
+		}
+		if e.Action == "dry-run" || e.Action == "pkill" || e.Action == "skipped" || e.Action == "failed" {
+			t.Errorf("unexpected action audit entry: %+v", e)
+		}
+	}
+
+	if len(m.audit.entries) != 0 {
+		t.Fatalf("expected 0 audit entries for zero-threshold rule, got %d: %+v",
+			len(m.audit.entries), m.audit.entries)
+	}
+
+	if m.actionLatch[active.FilePath] {
+		t.Errorf("active session must not be action-latched by a zero-threshold rule")
+	}
+	if m.actionLatch[idle.FilePath] {
+		t.Errorf("idle session must not be action-latched by a zero-threshold rule")
+	}
+}
+
 // TestCorrectiveAction_UntrustedPathGate verifies that when a session's FilePath
 // is not under any trusted root the action entry has Action=="skipped" and an
 // Outcome containing "untrusted path", and that NeutralizeSession/pkill is never
