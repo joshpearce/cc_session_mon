@@ -414,7 +414,7 @@ type auditDelegate struct {
 const (
 	AuditTimeWidth   = 8  // "15:04:05"
 	AuditOriginWidth = 12 // origin label or short session ID
-	AuditMetricWidth = 14 // metric name, e.g. "tok_per_min_1m"
+	AuditMetricWidth = 14 // metric name, e.g. "active_subagents" (long names truncate)
 	AuditValueWidth  = 16 // "value/threshold"
 	AuditActionWidth = 12 // action verb, e.g. "alert"
 )
