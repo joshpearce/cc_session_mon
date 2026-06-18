@@ -393,6 +393,128 @@ func (d *patternDelegate) Render(w io.Writer, m list.Model, index int, item list
 }
 
 // ============================================================================
+// Audit Item
+// ============================================================================
+
+// auditItem wraps an AuditEntry for the list component.
+type auditItem struct {
+	entry AuditEntry
+}
+
+func (i auditItem) FilterValue() string { return i.entry.Metric }
+func (i auditItem) Title() string       { return i.entry.Metric }
+func (i auditItem) Description() string { return i.entry.Outcome }
+
+// auditDelegate renders audit-log entries.
+type auditDelegate struct {
+	width int
+}
+
+// Column widths for audit list (exported for header rendering).
+const (
+	AuditTimeWidth   = 8  // "15:04:05"
+	AuditOriginWidth = 12 // origin label or short session ID
+	AuditMetricWidth = 14 // metric name, e.g. "active_subagents" (long names truncate)
+	AuditValueWidth  = 16 // "value/threshold"
+	AuditActionWidth = 12 // action verb, e.g. "alert"
+)
+
+func newAuditDelegate() *auditDelegate {
+	return &auditDelegate{width: 80}
+}
+
+func (d *auditDelegate) SetWidth(w int) {
+	d.width = w
+}
+
+func (d *auditDelegate) Height() int                             { return 1 }
+func (d *auditDelegate) Spacing() int                            { return 0 }
+func (d *auditDelegate) Update(_ tea.Msg, _ *list.Model) tea.Cmd { return nil }
+func (d *auditDelegate) Render(w io.Writer, m list.Model, index int, item list.Item) {
+	i, ok := item.(auditItem)
+	if !ok {
+		return
+	}
+
+	t := GetTheme()
+
+	// Time column
+	timeStr := padRight(i.entry.Time.Format("15:04:05"), AuditTimeWidth)
+
+	// Origin column: use Origin if present, else first 8 chars of SessionID.
+	origin := i.entry.Origin
+	if origin == "" || origin == "local" {
+		if len(i.entry.SessionID) >= 8 {
+			origin = i.entry.SessionID[:8]
+		} else {
+			origin = i.entry.SessionID
+		}
+	}
+	originStr := truncateToWidth(padRight(origin, AuditOriginWidth), AuditOriginWidth)
+
+	// Metric column
+	metricStr := truncateToWidth(padRight(i.entry.Metric, AuditMetricWidth), AuditMetricWidth)
+
+	// Value/Threshold column: format compactly.
+	valStr := formatAuditValue(i.entry.Value) + "/" + formatAuditValue(i.entry.Threshold)
+	valueStr := truncateToWidth(padRight(valStr, AuditValueWidth), AuditValueWidth)
+
+	// Action column
+	actionStr := truncateToWidth(padRight(i.entry.Action, AuditActionWidth), AuditActionWidth)
+
+	// Outcome fills remaining width
+	fixedWidth := AuditTimeWidth + 2 + AuditOriginWidth + 2 + AuditMetricWidth + 2 + AuditValueWidth + 2 + AuditActionWidth + 2
+	outcomeWidth := d.width - fixedWidth
+	if outcomeWidth < 8 {
+		outcomeWidth = 8
+	}
+	outcomeStr := truncateToWidth(i.entry.Outcome, outcomeWidth)
+
+	row := fmt.Sprintf("%s  %s  %s  %s  %s  %s",
+		timeStr, originStr, metricStr, valueStr, actionStr, outcomeStr)
+
+	// Pad to full width
+	rowW := lipgloss.Width(row)
+	if rowW < d.width {
+		row += strings.Repeat(" ", d.width-rowW)
+	}
+
+	// Choose base style by action type.
+	var baseStyle lipgloss.Style
+	switch i.entry.Action {
+	case "config-error":
+		baseStyle = lipgloss.NewStyle().Foreground(t.Danger)
+	case "alert":
+		baseStyle = lipgloss.NewStyle().Foreground(t.Warning)
+	default:
+		baseStyle = lipgloss.NewStyle().Foreground(t.Text)
+	}
+
+	var style lipgloss.Style
+	if index == m.Index() {
+		style = baseStyle.
+			Background(t.Surface).
+			Bold(true).
+			Width(d.width)
+	} else {
+		style = baseStyle.Width(d.width)
+	}
+
+	fmt.Fprint(w, style.Render(row))
+}
+
+// formatAuditValue formats a float64 audit value (count or token rate) compactly,
+// reusing the session column's k/M bucketing (formatTokPerMin). The only
+// difference is the zero case: an audit value/threshold of 0 renders as "0"
+// (e.g. "0/40") rather than the session list's idle dash.
+func formatAuditValue(v float64) string {
+	if v <= 0 {
+		return "0"
+	}
+	return formatTokPerMin(v)
+}
+
+// ============================================================================
 // Helper Functions
 // ============================================================================
 

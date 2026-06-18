@@ -20,6 +20,58 @@ theme: frappe
 # not configurable — they answer "what is happening right now".
 burn_window_minutes: 10
 
+# ============================================================================
+# Metric-threshold alerts
+# ============================================================================
+# Rules evaluated against every session on each 30s UI tick. Each rule names a
+# live metric and two thresholds:
+#   alert_threshold  -> rings the console bell (BEL) once per crossing, and adds
+#                       an entry to the Audit view (press 4). Set <= 0 to disable
+#                       this tier for the rule.
+#   action_threshold -> when corrective actions are enabled (see below), fires a
+#                       corrective action against the session. Set <= 0 to never
+#                       act for the rule.
+#   action_sustained_ticks -> consecutive over-action-threshold ticks required
+#                       before the action fires (1 = first tick; ticks are ~30s).
+#
+# Available metrics (both decay to 0 when a session goes idle, so an idle
+# session never perma-trips):
+#   active_subagents   -> subagents active in the last minute
+#   tokens_per_min_1m  -> billable tokens/min over the fixed 1-minute window
+#
+# Replacing this whole `alerts:` list overrides the built-in default. The values
+# below are the built-in default (alert at 20 active subagents, act at 40).
+# An empty or null `alerts:` disables all alerting.
+alerts:
+  - metric: active_subagents
+    alert_threshold: 20
+    action_threshold: 40
+    action_sustained_ticks: 1
+  # Also alert on a hot recent burn rate (uncomment and calibrate to taste):
+  - metric: tokens_per_min_1m
+    alert_threshold: 50000
+    action_threshold: 120000
+    action_sustained_ticks: 3
+
+# ============================================================================
+# Corrective actions  (DANGEROUS — off by default, opt-in only)
+# ============================================================================
+# When a session crosses an action_threshold above, "neutralize" it:
+#   - local sessions          -> pkill -f <project cwd>  (best-effort SIGTERM)
+#   - devcontainer sessions   -> comment the api.anthropic.com allow-rule line in
+#                                the proxy filter.py (no auto-rollback)
+# Each session is acted on at most once. There is NO undo. Start with
+# action_dry_run: true to see what *would* happen (logged to the Audit view)
+# before letting it actually run.
+enable_corrective_actions: false  # master switch; app is read-only until true
+action_dry_run: false             # true = log intended actions without executing
+
+# Devcontainer action settings (only used when a devcontainer session acts):
+#   devcontainer_filter_rel_path: proxy filter.py, relative to the .devcontainer dir
+#   anthropic_allow_pattern: regex locating the allow-rule line to comment out
+devcontainer_filter_rel_path: proxy/filter.py
+anthropic_allow_pattern: '(^|[^A-Za-z0-9.-])api\.anthropic\.com($|[^A-Za-z0-9.-])'
+
 # Tool groups define how commands are styled and filtered.
 # Groups are checked in order - first match wins.
 #

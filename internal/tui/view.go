@@ -52,6 +52,10 @@ func (m Model) View() string {
 		b.WriteString(m.renderPatternHeaders())
 		b.WriteString("\n")
 		b.WriteString(m.patternList.View())
+	case ViewAudit:
+		b.WriteString(m.renderAuditHeaders())
+		b.WriteString("\n")
+		b.WriteString(m.auditList.View())
 	}
 
 	// Help footer
@@ -127,6 +131,7 @@ func (m Model) renderViewTabs() string {
 		{"Sessions", ViewSessions, "1"},
 		{"Commands", ViewCommands, "2"},
 		{"Patterns", ViewPatterns, "3"},
+		{"Audit", ViewAudit, "4"},
 	}
 
 	rendered := make([]string, len(tabs))
@@ -199,6 +204,13 @@ func (m Model) renderHelp() string {
 			"esc:back",
 			"q:quit",
 		}
+	case ViewAudit:
+		help = []string{
+			"j/k:navigate",
+			"h/l:switch view",
+			"esc:back",
+			"q:quit",
+		}
 	}
 
 	return HelpStyle().Render(strings.Join(help, " | "))
@@ -254,6 +266,20 @@ func (m Model) renderPatternHeaders() string {
 	example := "Example"
 
 	header := fmt.Sprintf("%s  %s  %s  %s", pattern, group, count, example)
+	return ColumnHeaderStyle(m.width - 4).Render(header)
+}
+
+// renderAuditHeaders renders column headers for the audit log list.
+// Column widths mirror the auditDelegate constants so the header lines up.
+func (m Model) renderAuditHeaders() string {
+	time := padRight("Time", AuditTimeWidth)
+	origin := padRight("Origin", AuditOriginWidth)
+	metric := padRight("Metric", AuditMetricWidth)
+	value := padRight("Value/Thresh", AuditValueWidth)
+	action := padRight("Action", AuditActionWidth)
+	outcome := "Outcome"
+
+	header := fmt.Sprintf("%s  %s  %s  %s  %s  %s", time, origin, metric, value, action, outcome)
 	return ColumnHeaderStyle(m.width - 4).Render(header)
 }
 

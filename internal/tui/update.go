@@ -1,6 +1,8 @@
 package tui
 
 import (
+	"time"
+
 	"cc_session_mon/internal/session"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -43,7 +45,7 @@ func (m Model) handleNonKeyMsg(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmds = append(cmds, m.watchSessionsCmd())
 
 	case tickMsg:
-		m = m.handleTick()
+		m = m.handleTick(time.Time(msg))
 		cmds = append(cmds, m.tickCmd())
 
 	case errMsg:
@@ -77,17 +79,28 @@ func (m Model) updateActiveList(msg tea.Msg) (Model, tea.Cmd) {
 		m.commandList, cmd = m.commandList.Update(msg)
 	case ViewPatterns:
 		m.patternList, cmd = m.patternList.Update(msg)
+	case ViewAudit:
+		m.auditList, cmd = m.auditList.Update(msg)
 	}
 	return m, cmd
 }
 
-// handleTick refreshes activity status on timer tick
-func (m Model) handleTick() Model {
+// handleTick refreshes activity status and evaluates alert rules on timer tick.
+func (m Model) handleTick(now time.Time) Model {
 	if m.watcher != nil {
 		m.watcher.RefreshActivityStatus()
 		m.watcher.ScanForNewSubagents()
 		m.watcher.RefreshActiveMetrics()
+		// Take one snapshot and use it for both alert evaluation and the
+		// rendered list so they can't disagree on the session set.
+		m = m.refreshSessionsFromWatcher()
+		m = m.evaluateAlerts(m.sessions, now)
 		m = m.updateSessionList()
+		// Only rebuild the audit list when it's the visible view; the
+		// number-key and cycle handlers rebuild it on entry otherwise.
+		if m.viewMode == ViewAudit {
+			m = m.updateAuditList()
+		}
 	}
 	return m
 }
@@ -195,6 +208,9 @@ func (m Model) cycleViewForward() Model {
 		m.viewMode = ViewPatterns
 		m = m.aggregatePatterns()
 	case ViewPatterns:
+		m.viewMode = ViewAudit
+		m = m.updateAuditList()
+	case ViewAudit:
 		m.viewMode = ViewSessions
 	}
 	return m
@@ -204,6 +220,9 @@ func (m Model) cycleViewForward() Model {
 func (m Model) cycleViewBackward() Model {
 	switch m.viewMode {
 	case ViewSessions:
+		m.viewMode = ViewAudit
+		m = m.updateAuditList()
+	case ViewAudit:
 		m.viewMode = ViewPatterns
 		m = m.aggregatePatterns()
 	case ViewPatterns:
@@ -247,6 +266,9 @@ func (m Model) handleEnter() (Model, tea.Cmd, bool) {
 
 	case ViewPatterns:
 		// No action on enter in patterns view
+		return m, nil, false
+	case ViewAudit:
+		// No action on enter in audit view
 		return m, nil, false
 	}
 	return m, nil, false
@@ -309,7 +331,7 @@ func (m Model) handleEsc() (Model, tea.Cmd, bool) {
 	return m, nil, true
 }
 
-// handleNumberKeys handles 1/2/3 for direct view switching
+// handleNumberKeys handles 1/2/3/4 for direct view switching
 func (m Model) handleNumberKeys(key string) (Model, bool) {
 	switch key {
 	case "1":
@@ -320,6 +342,10 @@ func (m Model) handleNumberKeys(key string) (Model, bool) {
 		return m, true
 	case "3":
 		m.viewMode = ViewPatterns
+		return m, true
+	case "4":
+		m.viewMode = ViewAudit
+		m = m.updateAuditList()
 		return m, true
 	}
 	return m, false
@@ -351,6 +377,8 @@ func (m Model) handleListNavigation(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	case ViewPatterns:
 		m.patternList, cmd = m.patternList.Update(msg)
+	case ViewAudit:
+		m.auditList, cmd = m.auditList.Update(msg)
 	}
 
 	return m, cmd
@@ -446,22 +474,21 @@ func (m Model) handleSearchFocusedKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
-// handleSessionEvent processes watcher events
-func (m Model) handleSessionEvent(event sessionEventMsg) Model {
-	if m.watcher == nil {
-		return m
-	}
-
-	// Remember currently selected session by file path
+// refreshSessionsFromWatcher replaces m.sessions with the watcher's current
+// sorted snapshot, preserving the user's selection by file path and clamping
+// activeIdx to the new range. Shared by the watcher-event and tick paths so
+// both evaluate alerts and render the list from one consistent snapshot.
+func (m Model) refreshSessionsFromWatcher() Model {
+	// Remember currently selected session by file path.
 	var selectedFilePath string
 	if m.activeIdx >= 0 && m.activeIdx < len(m.sessions) {
 		selectedFilePath = m.sessions[m.activeIdx].FilePath
 	}
 
-	// Get fresh sorted list from watcher (already sorted, no re-sort needed)
+	// Get fresh sorted list from watcher (already sorted, no re-sort needed).
 	m.sessions = m.watcher.GetSessions()
 
-	// Restore selection by finding the session with the same file path
+	// Restore selection by finding the session with the same file path.
 	if selectedFilePath != "" {
 		for i, s := range m.sessions {
 			if s.FilePath == selectedFilePath {
@@ -471,13 +498,23 @@ func (m Model) handleSessionEvent(event sessionEventMsg) Model {
 		}
 	}
 
-	// Clamp activeIdx to valid range
+	// Clamp activeIdx to valid range.
 	if m.activeIdx >= len(m.sessions) {
 		m.activeIdx = len(m.sessions) - 1
 	}
 	if m.activeIdx < 0 && len(m.sessions) > 0 {
 		m.activeIdx = 0
 	}
+	return m
+}
+
+// handleSessionEvent processes watcher events
+func (m Model) handleSessionEvent(event sessionEventMsg) Model {
+	if m.watcher == nil {
+		return m
+	}
+
+	m = m.refreshSessionsFromWatcher()
 
 	m = m.updateSessionList()
 	if event.Type == "new_commands" {

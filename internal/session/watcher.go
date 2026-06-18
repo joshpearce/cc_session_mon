@@ -244,6 +244,14 @@ func (w *Watcher) SetOrigin(dir, label string) {
 	w.originMap[dir] = label
 }
 
+// ProjectsDirs returns a copy of the watched projects directories — the trusted
+// roots a corrective action must stay within.
+func (w *Watcher) ProjectsDirs() []string {
+	w.mu.RLock()
+	defer w.mu.RUnlock()
+	return append([]string(nil), w.projectsDirs...)
+}
+
 // Start begins watching for file changes
 func (w *Watcher) Start() {
 	go w.watchLoop()

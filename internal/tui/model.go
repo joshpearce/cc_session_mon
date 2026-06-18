@@ -1,6 +1,8 @@
 package tui
 
 import (
+	"fmt"
+	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -14,6 +16,9 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
+// alertKey identifies a (session, rule) pair for alert and action-streak latches.
+type alertKey struct{ filePath, metric string }
+
 // ViewMode represents the current view
 type ViewMode int
 
@@ -21,6 +26,7 @@ const (
 	ViewSessions ViewMode = iota // Session list
 	ViewCommands                 // Command log for selected session
 	ViewPatterns                 // Unique patterns aggregation
+	ViewAudit                    // Audit log of alerts and actions
 )
 
 // ModelOptions configures Model creation
@@ -42,11 +48,13 @@ type Model struct {
 	sessionList list.Model
 	commandList list.Model
 	patternList list.Model
+	auditList   list.Model
 
 	// Delegates (stored to update width)
 	sessionDelegate *sessionDelegate
 	commandDelegate *commandDelegate
 	patternDelegate *patternDelegate
+	auditDelegate   *auditDelegate
 
 	// Aggregated patterns for active session
 	patterns           []*session.CommandPattern
@@ -72,6 +80,21 @@ type Model struct {
 	width  int
 	height int
 
+	// Alert-engine state. alertLatch and actionStreak are keyed per (session
+	// FilePath, rule metric); actionLatch is keyed per session FilePath and
+	// ensures each session is acted on at most once regardless of which rule
+	// tripped.
+	alertLatch    map[alertKey]bool
+	actionStreak  map[alertKey]int
+	actionLatch   map[string]bool // per-session (FilePath) one-shot action gate
+	warnedMetrics map[string]bool // unknown metric names already logged (log-once)
+	audit         *auditLog
+	bell          func() // emits the alert bell; injectable for tests
+
+	// trustedRoots are the watched projects directories; corrective actions are
+	// restricted to sessions whose FilePath falls within one of these roots.
+	trustedRoots []string
+
 	// Error state
 	err error
 }
@@ -82,6 +105,7 @@ func NewModel(opts ModelOptions) Model {
 	sessionDel := newSessionDelegate()
 	commandDel := newCommandDelegate()
 	patternDel := newPatternDelegate()
+	auditDel := newAuditDelegate()
 
 	// Watch the local Claude projects directory plus any nested ones found
 	// under the configured search paths.
@@ -95,6 +119,16 @@ func NewModel(opts ModelOptions) Model {
 		sessionDelegate: sessionDel,
 		commandDelegate: commandDel,
 		patternDelegate: patternDel,
+		auditDelegate:   auditDel,
+		alertLatch:      make(map[alertKey]bool),
+		actionStreak:    make(map[alertKey]int),
+		actionLatch:     make(map[string]bool),
+		warnedMetrics:   make(map[string]bool),
+		audit:           &auditLog{},
+		bell:            func() { fmt.Fprint(os.Stderr, "\a") }, // BEL on stderr survives alt-screen
+	}
+	if watcher != nil {
+		m.trustedRoots = watcher.ProjectsDirs()
 	}
 
 	// Initialize search input
@@ -124,6 +158,13 @@ func NewModel(opts ModelOptions) Model {
 	m.patternList.SetShowStatusBar(false)
 	m.patternList.SetFilteringEnabled(false)
 	m.patternList.DisableQuitKeybindings()
+
+	m.auditList = list.New([]list.Item{}, auditDel, 0, 0)
+	m.auditList.SetShowTitle(false)
+	m.auditList.SetShowHelp(false)
+	m.auditList.SetShowStatusBar(false)
+	m.auditList.SetFilteringEnabled(false)
+	m.auditList.DisableQuitKeybindings()
 
 	return m
 }
@@ -373,6 +414,28 @@ func (m Model) aggregatePatterns() Model {
 	return m
 }
 
+// updateAuditList rebuilds the audit list items from the ring buffer, newest
+// first. It preserves the user's scroll position the same way the command and
+// pattern lists do — only snapping to the top (newest) on the initial build or
+// when the user was already there — so a 30s tick refresh can't yank a reader
+// off an older entry they're inspecting.
+func (m Model) updateAuditList() Model {
+	wasAtTop := m.auditList.Index() == 0
+	previousCount := len(m.auditList.Items())
+
+	entries := m.audit.recent()
+	items := make([]list.Item, len(entries))
+	for i := range entries {
+		items[i] = auditItem{entry: entries[i]}
+	}
+	m.auditList.SetItems(items)
+
+	if wasAtTop || previousCount == 0 {
+		m.auditList.Select(0)
+	}
+	return m
+}
+
 // updateListSizes updates list dimensions based on terminal size
 func (m Model) updateListSizes() Model {
 	// Reserve space for header (2), tabs (2), column headers (1), help (2), margins (2)
@@ -404,10 +467,12 @@ func (m Model) updateListSizes() Model {
 	m.sessionDelegate.SetWidth(listWidth)
 	m.commandDelegate.SetWidth(commandListWidth)
 	m.patternDelegate.SetWidth(listWidth)
+	m.auditDelegate.SetWidth(listWidth)
 
 	m.sessionList.SetSize(listWidth, listHeight)
 	m.commandList.SetSize(commandListWidth, commandListHeight)
 	m.patternList.SetSize(listWidth, listHeight)
+	m.auditList.SetSize(listWidth, listHeight)
 
 	return m
 }
