@@ -1,15 +1,27 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"os"
 
-	tea "github.com/charmbracelet/bubbletea"
 	"cc_session_mon/internal/config"
 	"cc_session_mon/internal/tui"
+	tea "github.com/charmbracelet/bubbletea"
 )
 
+// version is the release version, injected at build time via
+// -ldflags "-X main.version=...". It is "dev" for local builds.
+var version = "dev"
+
 func main() {
+	showVersion := flag.Bool("version", false, "print version and exit")
+	flag.Parse()
+	if *showVersion {
+		fmt.Println(version)
+		return
+	}
+
 	opts := tui.ModelOptions{
 		SearchPaths: config.Global().SearchPaths,
 	}

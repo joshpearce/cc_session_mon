@@ -30,5 +30,8 @@ Thumbs.db
 .direnv/
 result
 
+# CI-only version file (written from the release tag)
+.version
+
 # Git worktrees
 .worktrees/

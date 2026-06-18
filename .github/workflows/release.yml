@@ -1,0 +1,64 @@
+name: Release
+
+on:
+  push:
+    tags: ['v[0-9]+.[0-9]+.[0-9]+']
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            system: x86_64-linux
+            artifact: cc_session_mon-linux-amd64
+          - os: macos-latest
+            system: aarch64-darwin
+            artifact: cc_session_mon-darwin-arm64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: DeterminateSystems/nix-installer-action@main
+
+      - name: Set version
+        run: echo "${GITHUB_REF_NAME#v}" > .version
+
+      - name: Build
+        run: nix build .#packages.${{ matrix.system }}.cc-session-mon
+
+      - name: Rename binary
+        run: cp result/bin/cc_session_mon ${{ matrix.artifact }}
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ${{ matrix.artifact }}
+          path: ${{ matrix.artifact }}
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      # Checkout first: a checkout after download-artifact would git-clean the
+      # downloaded binaries. This provides RELEASE_NOTES.md for body_path below.
+      - uses: actions/checkout@v6
+
+      - uses: actions/download-artifact@v8
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Generate checksums
+        run: |
+          cd artifacts
+          sha256sum cc_session_mon-* > checksums.txt
+
+      - uses: softprops/action-gh-release@v3
+        with:
+          files: |
+            artifacts/cc_session_mon-*
+            artifacts/checksums.txt
+          body_path: RELEASE_NOTES.md
+          generate_release_notes: true
