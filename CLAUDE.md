@@ -98,7 +98,7 @@ Session parsing and monitoring:
 
 ### CLI Flags
 
-None. Configuration is via `config.yaml` (see Configuration below).
+`--version` prints the build version (injected via `-ldflags -X main.version`; `dev` for local builds) and exits. All other configuration is via `config.yaml` (see Configuration below).
 
 ## Development Workflow
 

@@ -27,7 +27,16 @@
         lib,
         pkgs,
         ...
-      }: {
+      }: let
+        # Release builds write the tag (without the leading "v") to .version in
+        # CI; local/dev builds fall back to a -dev marker. The file is gitignored.
+        version = let
+          versionFile = ./. + "/.version";
+        in
+          if builtins.pathExists versionFile
+          then builtins.replaceStrings ["\n"] [""] (builtins.readFile versionFile)
+          else "0.1.0-dev";
+      in {
         overlayAttrs = {
           inherit (config.packages) cc-session-mon;
         };
@@ -35,7 +44,7 @@
           default = config.packages.cc-session-mon;
           cc-session-mon = pkgs.buildGo125Module {
             pname = "cc-session-mon";
-            version = "0.1.0";
+            inherit version;
             vendorHash = builtins.readFile ./cc-session-mon.sri;
             src = lib.sourceFilesBySuffices (lib.sources.cleanSource ./.) [
               ".go"
@@ -45,6 +54,7 @@
             ldflags = [
               "-s"
               "-w"
+              "-X main.version=${version}"
             ];
           };
         };
