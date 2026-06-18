@@ -49,8 +49,8 @@ alerts:
     action_sustained_ticks: 1
   # Also alert on a hot recent burn rate (uncomment and calibrate to taste):
   - metric: tokens_per_min_1m
-    alert_threshold: 500
-    action_threshold: 1200
+    alert_threshold: 50000
+    action_threshold: 120000
     action_sustained_ticks: 3
 
 # ============================================================================
