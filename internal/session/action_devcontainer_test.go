@@ -243,6 +243,64 @@ func TestNeutralizeSession_Devcontainer_OutOfAnchorRejected(t *testing.T) {
 	// never written because IsTrustedPath rejects the path first).
 }
 
+// TestNeutralizeSession_Devcontainer_SymlinkEscapeRejected verifies that a
+// filter.py which is a symlink pointing OUTSIDE the .devcontainer anchor is
+// rejected (Action=="failed", detail mentions "symlink") and the link target is
+// left byte-for-byte unchanged. The lexical containment check alone would not
+// catch this — os.ReadFile/os.Rename follow symlinks — so EvalSymlinks must run.
+func TestNeutralizeSession_Devcontainer_SymlinkEscapeRejected(t *testing.T) {
+	// No t.Parallel(): real FS writes and a symlink.
+	tmp := t.TempDir()
+
+	anchor := filepath.Join(tmp, "repo", ".devcontainer")
+	sessionDir := filepath.Join(anchor, "containers", "app", ".claude", "projects", "enc")
+	if err := os.MkdirAll(sessionDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll sessionDir: %v", err)
+	}
+	proxyDir := filepath.Join(anchor, "proxy")
+	if err := os.MkdirAll(proxyDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll proxyDir: %v", err)
+	}
+
+	// A file OUTSIDE the anchor, and a filter.py symlink that targets it.
+	outsideDir := filepath.Join(tmp, "outside")
+	if err := os.MkdirAll(outsideDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll outsideDir: %v", err)
+	}
+	target := filepath.Join(outsideDir, "secret.py")
+	if err := os.WriteFile(target, []byte(representativeFilterPy), 0o644); err != nil {
+		t.Fatalf("WriteFile target: %v", err)
+	}
+	link := filepath.Join(proxyDir, "filter.py")
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatalf("Symlink: %v", err)
+	}
+
+	sess := &Session{
+		ID:       "symlink-escape-session",
+		FilePath: filepath.Join(sessionDir, "abc123.jsonl"),
+		Origin:   "repo/app",
+	}
+
+	outcome := NeutralizeSession(sess, devcontainerCfg(), false)
+
+	if outcome.Action != "failed" {
+		t.Fatalf("Action: want %q, got %q (detail: %s)", "failed", outcome.Action, outcome.Detail)
+	}
+	if !strings.Contains(outcome.Detail, "symlink") {
+		t.Errorf("Detail should mention symlink escape, got %q", outcome.Detail)
+	}
+
+	// The out-of-anchor target must be untouched.
+	got, err := os.ReadFile(target) //nolint:gosec // test fixture
+	if err != nil {
+		t.Fatalf("ReadFile target after rejected cut: %v", err)
+	}
+	if string(got) != representativeFilterPy {
+		t.Errorf("out-of-anchor target was modified:\ngot:  %q\nwant: %q", string(got), representativeFilterPy)
+	}
+}
+
 // TestNeutralizeSession_Devcontainer_NoAnchorFails verifies that a session whose
 // FilePath has no .devcontainer ancestor (plain path) returns Action=="failed"
 // mentioning the missing anchor.

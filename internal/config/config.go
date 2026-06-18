@@ -87,10 +87,13 @@ type Config struct {
 
 	// AnthropicAllowPattern is a regex used to locate the api.anthropic.com
 	// allow-rule line in the devcontainer proxy filter.py when taking corrective
-	// action. The default (api\.anthropic\.com) matches any line that contains
-	// the api.anthropic.com host as a substring — it is not anchored. Override
-	// with a fully anchored pattern (e.g. ^ALLOW\s+api\.anthropic\.com$) if
-	// stricter matching is needed for your filter.py format.
+	// action. The default requires api.anthropic.com to appear as a complete host
+	// token (bounded by a non-host character or a line edge), so it does not
+	// match a longer domain like api.anthropic.com.evil or a substring such as
+	// xapi.anthropic.com. It still matches any line mentioning the host as a
+	// whole — including a comment or a deny rule — so override with a pattern
+	// scoped to your allow directive (e.g. ^ALLOW\s+api\.anthropic\.com$) when
+	// your filter.py format requires it.
 	AnthropicAllowPattern string `yaml:"anthropic_allow_pattern"`
 }
 
@@ -109,7 +112,10 @@ func DefaultConfig() *Config {
 			},
 		},
 		DevcontainerFilterRelPath: "proxy/filter.py",
-		AnthropicAllowPattern:     `api\.anthropic\.com`,
+		// Match api.anthropic.com only as a complete host token (bounded by a
+		// non-host character or a line edge) so the filter-cut can't comment a
+		// line that merely contains it as a substring (e.g. api.anthropic.com.evil).
+		AnthropicAllowPattern: `(^|[^A-Za-z0-9.-])api\.anthropic\.com($|[^A-Za-z0-9.-])`,
 		ToolGroups: []ToolGroup{
 			{
 				Name:  "dangerous",

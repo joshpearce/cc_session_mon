@@ -95,10 +95,6 @@ func (m Model) applyActionTier(sess *session.Session, now time.Time, cfg *config
 		return m
 	}
 
-	// One-shot: latch the session regardless of branch so it cannot
-	// re-fire or spam the audit log on subsequent ticks.
-	m.actionLatch[sess.FilePath] = true
-
 	entry := AuditEntry{
 		Time:      now,
 		SessionID: sess.ID,
@@ -116,6 +112,15 @@ func (m Model) applyActionTier(sess *session.Session, now time.Time, cfg *config
 		outcome := session.NeutralizeSession(sess, cfg, cfg.ActionDryRun)
 		entry.Action = outcome.Action
 		entry.Outcome = outcome.Detail
+	}
+
+	// One-shot latch: consume the per-session action unless the attempt was a
+	// transient "failed" outcome (e.g. filter.py momentarily unreadable, pkill
+	// errored). A successful, dry-run, or deliberately-skipped (untrusted path —
+	// a stable condition) attempt latches so it cannot re-fire or spam the audit
+	// log; a transient failure is left un-latched so a later tick can retry.
+	if entry.Action != "failed" {
+		m.actionLatch[sess.FilePath] = true
 	}
 	m.audit.append(entry)
 	return m

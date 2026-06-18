@@ -266,6 +266,40 @@ func TestDefaultConfigAlertRules(t *testing.T) {
 	}
 }
 
+// TestDefaultAnthropicAllowPatternHostBounded verifies that the shipped default
+// pattern matches api.anthropic.com only as a complete host token, not as a
+// substring of a longer domain — so the filter-cut can't comment an unrelated
+// line such as a rule referencing api.anthropic.com.evil.
+func TestDefaultAnthropicAllowPatternHostBounded(t *testing.T) {
+	re, err := regexp.Compile(DefaultConfig().AnthropicAllowPattern)
+	if err != nil {
+		t.Fatalf("default AnthropicAllowPattern must compile: %v", err)
+	}
+
+	matches := []string{
+		`    "api.anthropic.com",`,
+		"ALLOW api.anthropic.com",
+		"https://api.anthropic.com/v1",
+		"api.anthropic.com",
+	}
+	for _, s := range matches {
+		if !re.MatchString(s) {
+			t.Errorf("default pattern should match %q", s)
+		}
+	}
+
+	nonMatches := []string{
+		"api.anthropic.com.evil", // longer domain — must not match
+		"xapi.anthropic.com",     // longer host prefix — must not match
+		"notanthropic.com",       // unrelated host
+	}
+	for _, s := range nonMatches {
+		if re.MatchString(s) {
+			t.Errorf("default pattern should NOT match %q", s)
+		}
+	}
+}
+
 func TestLoadOmittedAlertsKeepsDefaults(t *testing.T) {
 	tmpDir := t.TempDir()
 	configPath := filepath.Join(tmpDir, "config.yaml")

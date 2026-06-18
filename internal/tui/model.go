@@ -414,15 +414,25 @@ func (m Model) aggregatePatterns() Model {
 	return m
 }
 
-// updateAuditList rebuilds the audit list items from the ring buffer, newest first.
+// updateAuditList rebuilds the audit list items from the ring buffer, newest
+// first. It preserves the user's scroll position the same way the command and
+// pattern lists do — only snapping to the top (newest) on the initial build or
+// when the user was already there — so a 30s tick refresh can't yank a reader
+// off an older entry they're inspecting.
 func (m Model) updateAuditList() Model {
+	wasAtTop := m.auditList.Index() == 0
+	previousCount := len(m.auditList.Items())
+
 	entries := m.audit.recent()
 	items := make([]list.Item, len(entries))
 	for i := range entries {
 		items[i] = auditItem{entry: entries[i]}
 	}
 	m.auditList.SetItems(items)
-	m.auditList.Select(0)
+
+	if wasAtTop || previousCount == 0 {
+		m.auditList.Select(0)
+	}
 	return m
 }
 

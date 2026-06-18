@@ -91,9 +91,16 @@ func (m Model) handleTick(now time.Time) Model {
 		m.watcher.RefreshActivityStatus()
 		m.watcher.ScanForNewSubagents()
 		m.watcher.RefreshActiveMetrics()
-		m = m.evaluateAlerts(m.watcher.GetSessions(), now)
+		// Take one snapshot and use it for both alert evaluation and the
+		// rendered list so they can't disagree on the session set.
+		m = m.refreshSessionsFromWatcher()
+		m = m.evaluateAlerts(m.sessions, now)
 		m = m.updateSessionList()
-		m = m.updateAuditList()
+		// Only rebuild the audit list when it's the visible view; the
+		// number-key and cycle handlers rebuild it on entry otherwise.
+		if m.viewMode == ViewAudit {
+			m = m.updateAuditList()
+		}
 	}
 	return m
 }
@@ -467,22 +474,21 @@ func (m Model) handleSearchFocusedKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
-// handleSessionEvent processes watcher events
-func (m Model) handleSessionEvent(event sessionEventMsg) Model {
-	if m.watcher == nil {
-		return m
-	}
-
-	// Remember currently selected session by file path
+// refreshSessionsFromWatcher replaces m.sessions with the watcher's current
+// sorted snapshot, preserving the user's selection by file path and clamping
+// activeIdx to the new range. Shared by the watcher-event and tick paths so
+// both evaluate alerts and render the list from one consistent snapshot.
+func (m Model) refreshSessionsFromWatcher() Model {
+	// Remember currently selected session by file path.
 	var selectedFilePath string
 	if m.activeIdx >= 0 && m.activeIdx < len(m.sessions) {
 		selectedFilePath = m.sessions[m.activeIdx].FilePath
 	}
 
-	// Get fresh sorted list from watcher (already sorted, no re-sort needed)
+	// Get fresh sorted list from watcher (already sorted, no re-sort needed).
 	m.sessions = m.watcher.GetSessions()
 
-	// Restore selection by finding the session with the same file path
+	// Restore selection by finding the session with the same file path.
 	if selectedFilePath != "" {
 		for i, s := range m.sessions {
 			if s.FilePath == selectedFilePath {
@@ -492,13 +498,23 @@ func (m Model) handleSessionEvent(event sessionEventMsg) Model {
 		}
 	}
 
-	// Clamp activeIdx to valid range
+	// Clamp activeIdx to valid range.
 	if m.activeIdx >= len(m.sessions) {
 		m.activeIdx = len(m.sessions) - 1
 	}
 	if m.activeIdx < 0 && len(m.sessions) > 0 {
 		m.activeIdx = 0
 	}
+	return m
+}
+
+// handleSessionEvent processes watcher events
+func (m Model) handleSessionEvent(event sessionEventMsg) Model {
+	if m.watcher == nil {
+		return m
+	}
+
+	m = m.refreshSessionsFromWatcher()
 
 	m = m.updateSessionList()
 	if event.Type == "new_commands" {

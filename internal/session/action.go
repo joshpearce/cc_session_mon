@@ -58,6 +58,21 @@ var runPkill = func(pattern string) (matched bool, err error) {
 	return true, nil
 }
 
+// isSpecificEnoughForPkill reports whether path is an absolute path with at
+// least two non-empty segments. That is the minimum specificity for a safe
+// `pkill -f` substring: it rejects "/" and any single top-level directory
+// (e.g. "/usr", "/app"), whose names match unrelated host processes, while
+// admitting every realistic project working directory.
+func isSpecificEnoughForPkill(path string) bool {
+	if !filepath.IsAbs(path) {
+		return false
+	}
+	segments := strings.FieldsFunc(filepath.Clean(path), func(r rune) bool {
+		return r == filepath.Separator
+	})
+	return len(segments) >= 2
+}
+
 // NeutralizeSession dispatches the corrective action by origin: local sessions
 // are killed with pkill; devcontainer sessions get the filter.py cut.
 // dryRun returns the intended action without executing it.
@@ -69,14 +84,16 @@ func NeutralizeSession(sess *Session, cfg *config.Config, dryRun bool) ActionOut
 }
 
 func killLocal(sess *Session, dryRun bool) ActionOutcome {
-	// Guard: ProjectPath must be an absolute path of meaningful length before it
-	// is used as a pkill -f substring. An empty or very short pattern (e.g. "/")
-	// would match unrelated processes on the host — an irreversible mistake.
-	// filepath.IsAbs rejects both empty strings and relative paths.
-	if !filepath.IsAbs(sess.ProjectPath) || len(sess.ProjectPath) < 4 {
+	// Guard: ProjectPath is untrusted transcript content (the session's reported
+	// cwd) used as a `pkill -f` substring, and pkill -f matches against entire
+	// command lines. A shallow path — the root or any single top-level directory
+	// such as "/usr", "/app", or "/tmp" — appears in countless unrelated command
+	// lines and would trigger a host-wide, irreversible kill. Require an absolute
+	// path at least two segments deep; every real project cwd qualifies.
+	if !isSpecificEnoughForPkill(sess.ProjectPath) {
 		return ActionOutcome{
 			Action: "skipped",
-			Detail: "ProjectPath too short or not absolute for safe pkill: " + sess.ProjectPath,
+			Detail: "ProjectPath too shallow or not absolute for safe pkill: " + sess.ProjectPath,
 		}
 	}
 	// ProjectPath is untrusted transcript content; QuoteMeta so it is matched
@@ -113,11 +130,33 @@ func cutDevcontainer(sess *Session, cfg *config.Config, dryRun bool) ActionOutco
 
 	filterPath := filepath.Join(anchor, cfg.DevcontainerFilterRelPath)
 
-	// Reject traversal: the joined path must remain under the anchor.
+	// Reject lexical traversal: the joined path must remain under the anchor.
 	if !IsTrustedPath(filterPath, []string{anchor}) {
 		return ActionOutcome{
 			Action: "failed",
 			Detail: "filter path escapes anchor: " + filterPath,
+		}
+	}
+
+	// Defend against symlink escape: the lexical check above inspects only the
+	// path string, but os.ReadFile/os.Rename follow symlinks. If filterPath (or
+	// any parent component) resolves through a symlink to a location outside the
+	// anchor, refuse. EvalSymlinks requires the path to exist; a missing file
+	// returns an error here and falls through to the ReadFile failure below,
+	// preserving the "read filter.py" outcome.
+	if resolved, rerr := filepath.EvalSymlinks(filterPath); rerr == nil {
+		resolvedAnchor, aerr := filepath.EvalSymlinks(anchor)
+		if aerr != nil {
+			return ActionOutcome{
+				Action: "failed",
+				Detail: "resolve anchor: " + aerr.Error(),
+			}
+		}
+		if !IsTrustedPath(resolved, []string{resolvedAnchor}) {
+			return ActionOutcome{
+				Action: "failed",
+				Detail: "filter path escapes anchor via symlink: " + filterPath,
+			}
 		}
 	}
 

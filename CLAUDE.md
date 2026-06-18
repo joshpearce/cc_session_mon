@@ -77,7 +77,7 @@ Session parsing and monitoring:
 
 - `NeutralizeSession(sess, cfg, dryRun)` - Dispatches by origin: local → `killLocal` (pkill -f), devcontainer → `cutDevcontainer`.
 - `IsTrustedPath(filePath, roots)` - Reports whether `filePath` is equal to or under one of the watched project roots; used as a gate before any action fires.
-- `cutDevcontainer` - Walks `sess.FilePath` up to its `.devcontainer` anchor via `discovery.DevcontainerAnchor`, joins `cfg.DevcontainerFilterRelPath`, verifies the result stays under the anchor (rejects `..` traversal), then prefix-comments (`# `) every uncommented line matching `cfg.AnthropicAllowPattern` in the proxy `filter.py`. Write is atomic (temp file + `os.Rename`), idempotent (already-commented matching lines are left untouched), and has no rollback — the cut persists until hand-edited.
+- `cutDevcontainer` - Walks `sess.FilePath` up to its `.devcontainer` anchor via `discovery.DevcontainerAnchor`, joins `cfg.DevcontainerFilterRelPath`, verifies the result stays under the anchor both lexically and after `filepath.EvalSymlinks` (rejects `..` traversal and symlink escape), then prefix-comments (`# `) every uncommented line matching `cfg.AnthropicAllowPattern` in the proxy `filter.py`. Write is atomic (temp file + `os.Rename`), idempotent (already-commented matching lines are left untouched), and has no rollback — the cut persists until hand-edited.
 
 ## Commands
 
@@ -166,7 +166,10 @@ alerts:
 enable_corrective_actions: false  # master opt-in; app is read-only by default
 action_dry_run: false             # when true, log intended actions without executing
 devcontainer_filter_rel_path: proxy/filter.py  # path relative to .devcontainer anchor
-anthropic_allow_pattern: 'api\.anthropic\.com'  # regex matching the allow-rule line
+# Regex locating the allow-rule line. Default matches api.anthropic.com only as a
+# complete host token (not as a substring of a longer domain). Override with a
+# pattern scoped to your allow directive if filter.py also has deny/comment lines.
+anthropic_allow_pattern: '(^|[^A-Za-z0-9.-])api\.anthropic\.com($|[^A-Za-z0-9.-])'
 
 tool_groups:
   - name: dangerous
@@ -235,12 +238,12 @@ Burn-rate and agent metrics are computed from the whole transcript subtree (main
 - *Alert tier* (`AlertThreshold`): fires a stderr BEL once per threshold crossing, latched per `(FilePath, metric)` and cleared when the metric drops back below. A non-positive `AlertThreshold` disables this tier entirely.
 - *Action tier* (`ActionThreshold`): maintains a consecutive over-threshold tick streak per `(FilePath, metric)`; when the streak reaches `ActionSustainedTicks`, the corrective action is considered. A non-positive `ActionThreshold` resets the streak to 0 and never acts.
 
-**Safety rails (action tier only).** All of the following must hold before an action fires: (1) `EnableCorrectiveActions: true` in config (default false; app is read-only until opt-in); (2) the session has not been acted on yet — a per-session `actionLatch` keyed by `FilePath` ensures each session is acted on at most once regardless of how many rules trip; (3) `IsTrustedPath` verifies the session's `FilePath` lies within a watched projects root, so a crafted transcript path can't steer a kill or file-edit outside the monitored tree; (4) the streak has reached `ActionSustainedTicks`. `ActionDryRun: true` logs the intended action without executing it.
+**Safety rails (action tier only).** All of the following must hold before an action fires: (1) `EnableCorrectiveActions: true` in config (default false; app is read-only until opt-in); (2) the session has not been acted on yet — a per-session `actionLatch` keyed by `FilePath`; (3) `IsTrustedPath` verifies the session's `FilePath` lies within a watched projects root, so a crafted transcript path can't steer a kill or file-edit outside the monitored tree; (4) the streak has reached `ActionSustainedTicks`. `ActionDryRun: true` logs the intended action without executing it. The latch is consumed for every outcome **except** a transient `failed` one (e.g. `filter.py` momentarily unreadable, `pkill` errored): success, dry-run, and a deliberately `skipped` (untrusted-path — a stable condition) attempt all latch the session so it can't re-fire or spam the audit log, while a `failed` attempt is left un-latched so a later tick can retry.
 
 **Local vs devcontainer dispatch.** `NeutralizeSession` dispatches by `sess.Origin`:
 
-- Local (`origin == "" || "local"`): `killLocal` runs `pkill -f` with `regexp.QuoteMeta(sess.ProjectPath)` — no shell, pattern is matched literally. Exit code 1 (no match) is reported but not treated as an error.
-- Devcontainer: `cutDevcontainer` walks `sess.FilePath` up to its `.devcontainer` anchor via `discovery.DevcontainerAnchor`, joins `cfg.DevcontainerFilterRelPath`, verifies the joined path remains under the anchor (rejects `..` traversal), then prefix-comments (`# `) every uncommented line matching `cfg.AnthropicAllowPattern` in the proxy `filter.py`. The write is atomic (temp + `os.Rename`) and idempotent (already-commented lines are untouched). **There is no rollback** — the cut persists until hand-edited. `pkill -f` is similarly best-effort and leaves no undo path.
+- Local (`origin == "" || "local"`): `killLocal` runs `pkill -f` with `regexp.QuoteMeta(sess.ProjectPath)` — no shell, pattern is matched literally. `ProjectPath` is untrusted transcript content (the session's reported cwd), so before it reaches `pkill` it must pass `isSpecificEnoughForPkill`: an absolute path at least two segments deep, which rejects the root and any single top-level directory (`/usr`, `/app`, …) that would over-match host processes. Exit code 1 (no match) is reported but not treated as an error.
+- Devcontainer: `cutDevcontainer` walks `sess.FilePath` up to its `.devcontainer` anchor via `discovery.DevcontainerAnchor`, joins `cfg.DevcontainerFilterRelPath`, verifies the joined path remains under the anchor (rejects `..` traversal **and** symlink escape — the path is re-checked after `filepath.EvalSymlinks`), then prefix-comments (`# `) every uncommented line matching `cfg.AnthropicAllowPattern` in the proxy `filter.py`. The write is atomic (temp + `os.Rename`) and idempotent (already-commented lines are untouched). **There is no rollback** — the cut persists until hand-edited. `pkill -f` is similarly best-effort and leaves no undo path.
 
 **Audit ring buffer.** Every alert, action, skip, and config-error is appended to a fixed-capacity (50-entry) `auditLog` ring buffer on the `Model`. Entries are displayed newest-first in the 4th TUI view ("Audit", key `4`). The buffer is in-memory only; it is not persisted across restarts.
 

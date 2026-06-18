@@ -503,21 +503,15 @@ func (d *auditDelegate) Render(w io.Writer, m list.Model, index int, item list.I
 	fmt.Fprint(w, style.Render(row))
 }
 
-// formatAuditValue formats a float64 audit value (count or token rate) compactly.
-// Token-rate values can be large; counts are typically small integers.
+// formatAuditValue formats a float64 audit value (count or token rate) compactly,
+// reusing the session column's k/M bucketing (formatTokPerMin). The only
+// difference is the zero case: an audit value/threshold of 0 renders as "0"
+// (e.g. "0/40") rather than the session list's idle dash.
 func formatAuditValue(v float64) string {
-	switch {
-	case v <= 0:
+	if v <= 0 {
 		return "0"
-	case v < 1000:
-		return fmt.Sprintf("%.0f", v)
-	case v < 10000:
-		return fmt.Sprintf("%.1fk", v/1000)
-	case v < 1_000_000:
-		return fmt.Sprintf("%.0fk", v/1000)
-	default:
-		return fmt.Sprintf("%.1fM", v/1_000_000)
 	}
+	return formatTokPerMin(v)
 }
 
 // ============================================================================

@@ -233,6 +233,12 @@ func TestKillLocal_ShortOrRelativeProjectPathSkipped(t *testing.T) {
 		{name: "relative", projectPath: "some/relative/path"},
 		{name: "root_slash", projectPath: "/"},
 		{name: "too_short_absolute", projectPath: "/ab"},
+		// Single top-level directories: absolute and >4 chars, but only one
+		// segment deep, so they'd over-match unrelated host processes.
+		{name: "single_segment_usr", projectPath: "/usr"},
+		{name: "single_segment_app", projectPath: "/app"},
+		{name: "single_segment_home", projectPath: "/home"},
+		{name: "single_segment_trailing_slash", projectPath: "/usr/"},
 	}
 
 	for _, tt := range tests {

@@ -311,6 +311,54 @@ func TestCorrectiveAction_UntrustedPathGate(t *testing.T) {
 	}
 }
 
+// TestCorrectiveAction_FailedOutcomeNotLatched verifies that a transient
+// "failed" action outcome does NOT consume the per-session one-shot latch, so a
+// later tick retries — unlike a successful, dry-run, or skipped attempt, which
+// latch. The session here has a non-local origin but a FilePath with no
+// .devcontainer ancestor, so cutDevcontainer fails on every attempt.
+func TestCorrectiveAction_FailedOutcomeNotLatched(t *testing.T) {
+	// No t.Parallel(): mutates process-wide config global.
+	prev := config.Global()
+	config.SetGlobal(&config.Config{
+		EnableCorrectiveActions:   true,
+		ActionDryRun:              false,
+		DevcontainerFilterRelPath: "proxy/filter.py",
+		AnthropicAllowPattern:     `api\.anthropic\.com`,
+		Alerts: []config.AlertRule{
+			{
+				Metric:               "active_subagents",
+				AlertThreshold:       20,
+				ActionThreshold:      40,
+				ActionSustainedTicks: 1,
+			},
+		},
+	})
+	t.Cleanup(func() { config.SetGlobal(prev) })
+
+	bells := 0
+	m := makeActionModel(&bells, []string{"/trusted"})
+	now := time.Now()
+	// Trusted FilePath (gate passes) + non-local origin → cutDevcontainer, which
+	// fails because the path has no .devcontainer ancestor.
+	sess := sessionWithActiveAgents("/trusted/p/x.jsonl", 45, now)
+	sess.Origin = "repo/app"
+
+	// First tick: action attempted, fails, session left un-latched.
+	m = m.evaluateAlerts([]*session.Session{sess}, now)
+	if got := countActionEntries(m.audit.entries, "failed"); got != 1 {
+		t.Fatalf("first tick: expected 1 failed action entry, got %d; entries: %+v", got, m.audit.entries)
+	}
+	if m.actionLatch[sess.FilePath] {
+		t.Fatal("a failed action must NOT latch the session — retry must remain possible")
+	}
+
+	// Second tick: not latched → retries and fails again.
+	m = m.evaluateAlerts([]*session.Session{sess}, now)
+	if got := countActionEntries(m.audit.entries, "failed"); got != 2 {
+		t.Fatalf("second tick: expected 2 failed action entries (retry), got %d; entries: %+v", got, m.audit.entries)
+	}
+}
+
 // filterPyContent is the representative proxy allow-list used in Part C.
 const filterPyContent = `# proxy allow list
 ALLOW = [
