@@ -17,7 +17,7 @@ jobs:
             artifact: cc_session_mon-darwin-arm64
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - uses: DeterminateSystems/nix-installer-action@main
 
@@ -43,7 +43,7 @@ jobs:
     steps:
       # Checkout first: a checkout after download-artifact would git-clean the
       # downloaded binaries. This provides RELEASE_NOTES.md for body_path below.
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - uses: actions/download-artifact@v8
         with:
