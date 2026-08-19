@@ -1,9 +1,15 @@
-# cc_session_mon v0.1.0
+# cc_session_mon v0.1.1
 
-First tagged release of the Claude Code session-monitoring TUI. Watches your
+First usable release of the Claude Code session-monitoring TUI. Watches your
 local sessions plus any nested `.claude/projects` directories (e.g. devcontainer
 mounts) and surfaces live activity, token burn, and subagent fan-out. Highlights
 below; the full list of merged pull requests is appended automatically.
+
+> **Supersedes v0.1.0.** That tag's binaries reported `0.1.0-dev` from
+> `--version`: the release workflow wrote the tag to a gitignored `.version`
+> file, which a plain `.#` flakeref can't see, so the build silently fell back
+> to a hardcoded literal. Fixed in #26 by building via `path:.`. The v0.1.0
+> binaries are otherwise identical in behavior, but use these instead.
 
 ## ✨ Features
 
@@ -35,6 +41,7 @@ below; the full list of merged pull requests is appended automatically.
 ## 🛠 Build & CI
 
 - Reproducible Nix builds across linux-amd64 and darwin-arm64, with the version
-  injected from the release tag into the binary (`cc_session_mon --version`).
+  injected from the release tag into the binary (`cc_session_mon --version`),
+  verified end-to-end (#26).
 - golangci-lint v2, Go 1.25, and automatic SRI-hash regeneration for Dependabot
   bumps.
