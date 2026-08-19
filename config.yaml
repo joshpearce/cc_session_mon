@@ -50,7 +50,7 @@ alerts:
   # Also alert on a hot recent burn rate (uncomment and calibrate to taste):
   - metric: tokens_per_min_1m
     alert_threshold: 50000
-    action_threshold: 120000
+    action_threshold: 300000
     action_sustained_ticks: 3
 
 # ============================================================================
@@ -64,12 +64,12 @@ alerts:
 # action_dry_run: true to see what *would* happen (logged to the Audit view)
 # before letting it actually run.
 enable_corrective_actions: false  # master switch; app is read-only until true
-action_dry_run: false             # true = log intended actions without executing
+action_dry_run: true             # true = log intended actions without executing
 
 # Devcontainer action settings (only used when a devcontainer session acts):
 #   devcontainer_filter_rel_path: proxy filter.py, relative to the .devcontainer dir
 #   anthropic_allow_pattern: regex locating the allow-rule line to comment out
-devcontainer_filter_rel_path: proxy/filter.py
+devcontainer_filter_rel_path: containers/proxy/opt/devagent-proxy/filter.py
 anthropic_allow_pattern: '(^|[^A-Za-z0-9.-])api\.anthropic\.com($|[^A-Za-z0-9.-])'
 
 # Tool groups define how commands are styled and filtered.
