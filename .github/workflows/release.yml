@@ -25,7 +25,10 @@ jobs:
         run: echo "${GITHUB_REF_NAME#v}" > .version
 
       - name: Build
-        run: nix build .#packages.${{ matrix.system }}.cc-session-mon
+        # path:. (not .#) so the flake source includes the gitignored .version
+        # written above; a plain .# flakeref sees only git-tracked files and the
+        # version would silently fall back to "dev".
+        run: nix build path:.#packages.${{ matrix.system }}.cc-session-mon
 
       - name: Rename binary
         run: cp result/bin/cc_session_mon ${{ matrix.artifact }}

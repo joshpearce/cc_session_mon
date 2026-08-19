@@ -29,13 +29,14 @@
         ...
       }: let
         # Release builds write the tag (without the leading "v") to .version in
-        # CI; local/dev builds fall back to a -dev marker. The file is gitignored.
+        # CI and build via `path:.` so this gitignored file is visible to the
+        # flake; local/dev builds fall back to "dev".
         version = let
           versionFile = ./. + "/.version";
         in
           if builtins.pathExists versionFile
           then builtins.replaceStrings ["\n"] [""] (builtins.readFile versionFile)
-          else "0.1.0-dev";
+          else "dev";
       in {
         overlayAttrs = {
           inherit (config.packages) cc-session-mon;
