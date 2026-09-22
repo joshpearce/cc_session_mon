@@ -43,7 +43,7 @@
         };
         packages = {
           default = config.packages.cc-session-mon;
-          cc-session-mon = pkgs.buildGo125Module {
+          cc-session-mon = pkgs.buildGoModule {
             pname = "cc-session-mon";
             inherit version;
             vendorHash = builtins.readFile ./cc-session-mon.sri;
